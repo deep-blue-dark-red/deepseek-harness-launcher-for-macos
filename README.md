@@ -106,10 +106,10 @@ make clean       # Remove build outputs and cached artifacts
 
 - **Operating System**: macOS 13.0 (Ventura) or newer (Sonoma, Sequoia).
 - **Architectures**: Apple Silicon (`arm64`) and Intel (`x86_64`).
-- **Dependencies**: 
-  - Node.js (`^22.19 || >=24`)
-  - `pnpm`
-  - Xcode Command Line Tools (`swiftc`)
+- **Launcher Dependencies**:
+  - **Prebuilt Binary**: None (pure native Swift/AppKit, zero runtime dependencies).
+  - **Building from Source**: Xcode Command Line Tools (`swiftc` via `xcode-select --install`) and `make`.
+- **Target Workload**: A local clone of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (the launcher automatically discovers `node` and `pnpm` across Homebrew, nvm, asdf, proto, fnm, and volta).
 
 ---
 
