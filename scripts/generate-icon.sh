@@ -25,7 +25,7 @@ fi
 
 mkdir -p "${TMP_DIR}" "${TMP_ICONSET}"
 
-echo "Rendering 1024x1024 soft-corner icon with CoreGraphics..."
+echo "Rendering 1024x1024 icon preserving transparency and aspect ratio..."
 cat << 'SWIFT_EOF' > "${TMP_DIR}/render_icon.swift"
 import Cocoa
 import CoreGraphics
@@ -42,10 +42,6 @@ guard let sourceImage = NSImage(contentsOfFile: sourcePath) else {
 }
 
 let canvasSize: CGFloat = 1024
-let boxSize: CGFloat = 860
-let cornerRadius: CGFloat = 195
-let padding = (canvasSize - boxSize) / 2
-
 let colorSpace = CGColorSpaceCreateDeviceRGB()
 guard let context = CGContext(
     data: nil,
@@ -60,56 +56,26 @@ guard let context = CGContext(
     exit(1)
 }
 
-let nsContext = NSGraphicsContext(cgContext: context, flipped: false)
-NSGraphicsContext.current = nsContext
-
 // 1. Transparent background canvas
 context.clear(CGRect(x: 0, y: 0, width: canvasSize, height: canvasSize))
+context.interpolationQuality = .high
 
-// 2. Rounded rectangle path for the icon squircle
-let boxRect = CGRect(x: padding, y: padding, width: boxSize, height: boxSize)
-let roundedPath = CGPath(
-    roundedRect: boxRect,
-    cornerWidth: cornerRadius,
-    cornerHeight: cornerRadius,
-    transform: nil
-)
-
-// 3. Drop shadow for macOS desktop depth
-context.saveGState()
-context.setShadow(
-    offset: CGSize(width: 0, height: -10),
-    blur: 20,
-    color: CGColor(red: 0, green: 0, blue: 0, alpha: 0.20)
-)
-context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
-context.addPath(roundedPath)
-context.fillPath()
-context.restoreGState()
-
-// 4. Clip to the rounded rect and draw the image
-context.saveGState()
-context.addPath(roundedPath)
-context.clip()
-
-// Fill background white
-context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
-context.fill(boxRect)
-
-// Draw the whale image inside the box
-let imgRect = CGRect(x: padding + 15, y: padding + 15, width: boxSize - 30, height: boxSize - 30)
-if let cgImage = sourceImage.cgImage(forProposedRect: nil, context: nil, hints: nil) {
-    context.draw(cgImage, in: imgRect)
+// 2. Draw the source image preserving transparency and aspect ratio without artificial cropping
+guard let cgImage = sourceImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+    print("Failed to get CGImage")
+    exit(1)
 }
-context.restoreGState()
 
-// 5. Subtle inner border (standard macOS app icon style)
-context.saveGState()
-context.addPath(roundedPath)
-context.setStrokeColor(CGColor(red: 0, green: 0, blue: 0, alpha: 0.12))
-context.setLineWidth(1.5)
-context.strokePath()
-context.restoreGState()
+let imgWidth = CGFloat(cgImage.width)
+let imgHeight = CGFloat(cgImage.height)
+let scale = min(canvasSize / imgWidth, canvasSize / imgHeight)
+let targetWidth = imgWidth * scale
+let targetHeight = imgHeight * scale
+let originX = (canvasSize - targetWidth) / 2.0
+let originY = (canvasSize - targetHeight) / 2.0
+let destRect = CGRect(x: originX, y: originY, width: targetWidth, height: targetHeight)
+
+context.draw(cgImage, in: destRect)
 
 guard let outputCGImage = context.makeImage() else {
     print("Failed to make CGImage")
