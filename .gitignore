@@ -1,0 +1,20 @@
+# Build outputs
+dist/
+build/
+*.o
+*.app/
+*.dSYM/
+*.iconset/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Logs
+*.log
+Library/Logs/
+
+# Temporary files
+/tmp/
+*.tmp
