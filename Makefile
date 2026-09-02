@@ -1,4 +1,4 @@
-.PHONY: all build install clean icon run
+.PHONY: all build install uninstall clean icon run
 
 all: build
 
@@ -6,7 +6,10 @@ build:
 	@bash scripts/build.sh
 
 install:
-	@bash scripts/install.sh
+	@bash install.sh
+
+uninstall:
+	@bash uninstall.sh
 
 icon:
 	@bash scripts/generate-icon.sh

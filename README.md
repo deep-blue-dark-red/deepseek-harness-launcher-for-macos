@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="resources/whale-harness.png" alt="DeepSeek Harness macOS Launcher" width="180" />
+<img src="resources/whale-harness.png" alt="DeepSeek Harness macOS Launcher" width="160" />
 
 # DeepSeek Harness Launcher for macOS
 
@@ -19,53 +19,62 @@
 
 ---
 
-## 🌟 Overview
+## Installation
 
-**DeepSeek Harness Launcher** (`DeepSeek Harness.app`) is a lightweight, zero-overhead native macOS AppKit application designed to seamlessly launch, control, and monitor DeepSeek Harness servers, web interfaces, interactive terminal sessions, and headless tasks directly from your macOS Menu Bar, Dock, Spotlight, or Launchpad.
-
----
-
-## ✨ Features
-
-- 🐋 **Menu Bar & Status Item**: Instant access from the macOS menu bar (`🐋 DSH`) with live status indicators (`🟢 Running`, `🟡 Starting`, `⚪ Stopped`).
-- 🖥 **Central Control Window**: High-resolution GUI panel displaying active workspace, server state, quick action buttons, and configuration options.
-- ⚡ **Interactive Terminal Session**: Opens a native terminal window pre-configured with workspace paths, `$PATH` discovery, and active API credentials.
-- 🤖 **Headless Task Launcher**: Run ad-hoc AI tasks on demand (`dsh --profile headless "<task>"`) with a native prompt dialog.
-- 📜 **Live Log Viewer**: Dedicated console window displaying real-time streaming server logs, historical logs, with search, copy, clear, and direct log file opening.
-- 🔍 **Smart Environment Discovery**: Automatically locates `node` (>= 22.19.0) and `pnpm` across Homebrew (`/opt/homebrew`, `/usr/local`), `nvm`, `asdf`, `proto`, `fnm`, and `volta`.
-- 🔑 **Secure Key Management**: Prompt and store `DEEPSEEK_API_KEY` securely in `~/.dsh/.env` or repository `.env`.
-- 🛡 **Clean Lifecycle & Teardown**: Guarantees background Node and server processes are cleanly terminated upon exit.
-
----
-
-## 🚀 Quick Start
-
-### Installation
-
-Clone the repository and run `make install`:
+Run the end-to-end installer:
 
 ```bash
-git clone https://github.com/deep-blue-dark-red/deepseek-harness-launcher-for-macos.git ~/git/deepseek-harness-launcher
-cd ~/git/deepseek-harness-launcher
-make install
+git clone https://github.com/deep-blue-dark-red/deepseek-harness-launcher-for-macos
+cd deepseek-harness-launcher-for-macos
+./install.sh
 ```
 
 Once installed, launch **DeepSeek Harness** via:
 - **Spotlight**: Press `Cmd + Space`, type `DeepSeek Harness`, and press `Enter`.
 - **Finder / Launchpad**: Open `~/Applications/DeepSeek Harness.app`.
-- **Terminal CLI**: `open -a "DeepSeek Harness"`
+- **Terminal**: `open -a "DeepSeek Harness"`
+
+## Uninstallation
+
+To remove the application and stop background processes:
+
+```bash
+./uninstall.sh
+```
 
 ---
 
-## 🛠 Repository Structure
+## Overview
+
+**DeepSeek Harness Launcher** (`DeepSeek Harness.app`) is a lightweight native macOS AppKit application designed to launch, control, and monitor DeepSeek Harness servers, web interfaces, interactive terminal sessions, and headless tasks directly from your macOS Menu Bar, Dock, Spotlight, or Launchpad.
+
+---
+
+## Features
+
+- **Menu Bar & Status Item**: Instant access from the macOS menu bar (`DSH`) with live status indicators (Running, Starting, Stopped).
+- **Central Control Window**: High-resolution GUI panel displaying active workspace, server state, quick action buttons, and configuration options.
+- **Interactive Terminal Session**: Opens a native terminal window pre-configured with workspace paths, `$PATH` discovery, and active API credentials.
+- **Headless Task Launcher**: Run ad-hoc AI tasks on demand (`dsh --profile headless "<task>"`) with a native prompt dialog.
+- **Live Log Viewer**: Dedicated console window displaying real-time streaming server logs and historical output, with copy, clear, and direct log file opening.
+- **Smart Environment Discovery**: Automatically locates `node` (>= 22.19.0) and `pnpm` across Homebrew (`/opt/homebrew`, `/usr/local`), `nvm`, `asdf`, `proto`, `fnm`, and `volta`.
+- **Secure Key Management**: Prompt and store `DEEPSEEK_API_KEY` securely in `~/.dsh/.env` or repository `.env`.
+- **Clean Lifecycle & Teardown**: Guarantees background Node and server processes are cleanly terminated upon exit.
+
+---
+
+## Repository Structure
 
 ```
-deepseek-harness-launcher/
+deepseek-harness-launcher-for-macos/
+├── install.sh                  # End-to-end installation script
+├── uninstall.sh                # Clean uninstallation script
 ├── Info.plist                  # macOS Application bundle metadata & permissions
-├── Makefile                    # Make targets (build, install, icon, clean)
+├── Makefile                    # Make targets (build, install, uninstall, clean)
 ├── dsh-launcher.command        # Double-clickable macOS Finder script
 ├── resources/
 │   ├── AppIcon.icns            # Multi-resolution Retina icon bundle (16x16 to 1024x1024)
+│   ├── desktop-macos.png       # High-resolution desktop UI screenshot
 │   ├── whale-harness.png       # High-resolution logo artwork
 │   └── favicon.svg             # Vector icon asset
 ├── src/
@@ -73,16 +82,17 @@ deepseek-harness-launcher/
 └── scripts/
     ├── build.sh                # Compiles swift source and bundles DeepSeek Harness.app
     ├── generate-icon.sh        # Generates soft-corner squircle .icns from artwork
-    └── install.sh              # Installs bundle to ~/Applications/DeepSeek Harness.app
+    └── install.sh              # Bundle installer helper
 ```
 
 ---
 
-## 🔨 Build & Developer Targets
+## Build Targets
 
 ```bash
-make build       # Compile and bundle dist/DeepSeek Harness.app
 make install     # Build and install to ~/Applications/DeepSeek Harness.app
+make uninstall   # Stop running instances and remove application
+make build       # Compile and bundle dist/DeepSeek Harness.app
 make run         # Build and launch application immediately
 make icon        # Regenerate AppIcon.icns from resources/whale-harness.png
 make clean       # Remove build outputs and cached artifacts
@@ -90,7 +100,7 @@ make clean       # Remove build outputs and cached artifacts
 
 ---
 
-## 💻 System Requirements
+## System Requirements
 
 - **Operating System**: macOS 13.0 (Ventura) or newer (Sonoma, Sequoia).
 - **Architectures**: Apple Silicon (`arm64`) and Intel (`x86_64`).
@@ -101,7 +111,6 @@ make clean       # Remove build outputs and cached artifacts
 
 ---
 
-## 👤 Author & Credits
+## License
 
-Made by **[deep-blue-dark-red](https://github.com/deep-blue-dark-red/deepseek-harness-launcher-for-macos)**.
-Distributed under the [MIT License](https://opensource.org/licenses/MIT).
+Distributed under the MIT License.
