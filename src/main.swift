@@ -10,6 +10,7 @@ struct Constants {
     static let defaultPort = "5173"
     static let defaultProfile = "web"
     static let githubUrl = "https://github.com/deepseek-ai/deepseek-harness"
+    static let authorUrl = "https://github.com/deep-blue-dark-red/deepseek-harness-launcher-for-macos"
     static let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Logs/DeepSeekHarness")
 }
@@ -746,6 +747,23 @@ class MainWindowController: NSWindowController {
         logsButton.font = NSFont.systemFont(ofSize: 13, weight: .medium)
         logsButton.frame = NSRect(x: 290, y: buttonY - 55, width: 240, height: 42)
         container.addSubview(logsButton)
+        
+        // Author Credit Link (above separator)
+        let creditField = NSTextField(frame: NSRect(x: 30, y: 92, width: 500, height: 20))
+        creditField.isEditable = false
+        creditField.isSelectable = true
+        creditField.isBordered = false
+        creditField.drawsBackground = false
+        creditField.alignment = .center
+        
+        let creditText = "Made by deep-blue-dark-red"
+        let attrString = NSMutableAttributedString(string: creditText)
+        let linkRange = (creditText as NSString).range(of: "deep-blue-dark-red")
+        attrString.addAttribute(.font, value: NSFont.systemFont(ofSize: 12, weight: .medium), range: NSRange(location: 0, length: attrString.length))
+        attrString.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: NSRange(location: 0, length: attrString.length))
+        attrString.addAttribute(.link, value: Constants.authorUrl, range: linkRange)
+        creditField.attributedStringValue = attrString
+        container.addSubview(creditField)
         
         // Bottom Utility Bar
         let separator = NSBox(frame: NSRect(x: 30, y: 70, width: 500, height: 1))
