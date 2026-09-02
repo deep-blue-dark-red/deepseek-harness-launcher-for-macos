@@ -59,7 +59,7 @@ To remove the application and stop background processes:
 - **Live Log Viewer**: Dedicated console window displaying real-time streaming server logs and historical output, with copy, clear, and direct log file opening.
 - **Smart Environment Discovery**: Automatically locates `node` (>= 22.19.0) and `pnpm` across Homebrew (`/opt/homebrew`, `/usr/local`), `nvm`, `asdf`, `proto`, `fnm`, and `volta`.
 - **Secure Key Management**: Prompt and store `DEEPSEEK_API_KEY` securely in `~/.dsh/.env` or repository `.env`.
-- **Clean Lifecycle & Teardown**: DSHL hosts the `pnpm` process and killing DSHL also tears down the underlying DeepSeek-Harness process cleanly, mitigating the need for console commands entirely. Session states are preserved.
+- **Server Startup & Clean Teardown**: DeepSeek-Harness runs as a managed child process; killing DSHL also tears down the child server process cleanly, mitigating the need for console commands entirely. No terminal process is started (hidden, with output streamable via *View Live Logs*). Session states are preserved.
 - **Zero Telemetry & Private**: No analytics, telemetry, or third-party network calls. I wrote this for my own usage for quick launching via Raycast, Spotlight, or menu bar.
 
 ---
