@@ -53,7 +53,9 @@ To remove the application and stop background processes:
 
 ## Features
 
-- **Menu Bar & Status Item**: Instant access from the macOS menu bar (`🐋 DSH` when running, `🐡 DSH` when starting, `🦑 DSH` when stopped).
+- **Menu Bar & Status Item**: Instant access from the macOS menu bar. The status badge reads `🐳` (happy whale) when started and nothing to do, `🐋 0|1` (working whale) with one task running and zero completed, `🐳 3|3` (happy whale) once three tasks have completed — the counter is `<completed>|<total>` — plus `🐡` (puffer fish) during server startup and `🦑` (squid) when the server is not running.
+- **Menu Bar Task Dropdown**: The dropdown lists every session with its task name and status, quick navigation (click a task to open it in the web UI), and per-task plus session-total token usage (`↓ in  ↑ out`).
+  <img src="resources/menu-bar-detail.png" alt="Menu bar dropdown showing task names, statuses, quick navigation, and token usage" width="600" />
 - **Central Control Window**: High-resolution GUI panel displaying active workspace, server state, quick action buttons, and configuration options.
 - **Interactive Terminal Session**: Opens a native terminal window pre-configured with workspace paths and `$PATH` discovery.
 - **Headless Task Launcher**: Run ad-hoc AI tasks on demand (`dsh --profile headless "<task>"`) with a native prompt dialog.
@@ -77,6 +79,7 @@ deepseek-harness-launcher-for-macos/
 ├── resources/
 │   ├── AppIcon.icns            # Multi-resolution Retina icon bundle (16x16 to 1024x1024)
 │   ├── desktop-macos.png       # High-resolution desktop UI screenshot
+│   ├── menu-bar-detail.png     # Menu bar dropdown screenshot (tasks & token usage)
 │   ├── whale-harness.png       # High-resolution logo artwork
 │   └── favicon.svg             # Vector icon asset
 ├── src/

@@ -1759,7 +1759,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         
         if let button = statusItem.button {
-            button.title = "🦑 DSH"
+            button.title = "🦑"
         }
         
         statusMenu = NSMenu()
@@ -1821,11 +1821,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     static func statusTitle(for status: ServerStatus, counts: TaskCounts) -> String {
         switch status {
         case .stopped, .error:
-            return "🦑 DSH"
+            return "🦑"
         case .starting:
-            return "🐡 DSH"
+            return "🐡"
         case .running:
-            guard !counts.isEmpty else { return "🐳 DSH" }
+            guard !counts.isEmpty else { return "🐳" }
             let whale = counts.running > 0 ? "🐋" : "🐳"
             let badge = "\(whale) \(counts.completed)|\(counts.total)"
             return counts.halted > 0 ? "\(badge) 🐠\(counts.halted)" : badge
