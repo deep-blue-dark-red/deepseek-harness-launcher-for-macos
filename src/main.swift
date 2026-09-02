@@ -309,6 +309,29 @@ class ServerManager: NSObject {
         """
     }
     
+    static func killLingeringServerProcesses() {
+        let ports = ["3080", "5173"]
+        for port in ports {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+            task.arguments = ["-ti", ":\(port)"]
+            let pipe = Pipe()
+            task.standardOutput = pipe
+            task.standardError = Pipe()
+            if (try? task.run()) != nil {
+                task.waitUntilExit()
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                if let output = String(data: data, encoding: .utf8) {
+                    let pids = output.components(separatedBy: .newlines).compactMap { Int32($0.trimmingCharacters(in: .whitespaces)) }
+                    for pid in pids where pid > 0 && pid != ProcessInfo.processInfo.processIdentifier {
+                        kill(pid, SIGTERM)
+                        kill(pid, SIGKILL)
+                    }
+                }
+            }
+        }
+    }
+    
     func startWebServer(port: String = Constants.defaultPort) {
         guard case .stopped = status else { return }
         
@@ -322,6 +345,10 @@ class ServerManager: NSObject {
             self.status = .error(message: "DEEPSEEK_API_KEY is not configured.")
             return
         }
+        
+        // Clean up any stale processes on port 3080 or 5173 before starting
+        ServerManager.killLingeringServerProcesses()
+        usleep(150_000)
         
         self.status = .starting
         self.currentWebUrl = nil
@@ -412,22 +439,28 @@ class ServerManager: NSObject {
     
     func stopWebServer() {
         guard let proc = process, proc.isRunning else {
+            ServerManager.killLingeringServerProcesses()
             self.status = .stopped
             return
         }
         
         appendLogLine(">>> Stopping DeepSeek Harness Web server...")
+        let pid = proc.processIdentifier
+        kill(-pid, SIGTERM)
         proc.terminate()
+        
         DispatchQueue.global().async {
             for _ in 0..<20 {
                 if !proc.isRunning { break }
                 Thread.sleep(forTimeInterval: 0.1)
             }
             if proc.isRunning {
-                kill(proc.processIdentifier, SIGKILL)
+                kill(-pid, SIGKILL)
+                kill(pid, SIGKILL)
             }
-            DispatchQueue.main.async {
-                self.status = .stopped
+            ServerManager.killLingeringServerProcesses()
+            DispatchQueue.main.async { [weak self] in
+                self?.status = .stopped
             }
         }
     }
@@ -1138,11 +1171,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     @objc private func quitApp() {
         ServerManager.shared.stopWebServer()
+        ServerManager.killLingeringServerProcesses()
         NSApp.terminate(nil)
     }
     
     func applicationWillTerminate(_ notification: Notification) {
         ServerManager.shared.stopWebServer()
+        ServerManager.killLingeringServerProcesses()
     }
     
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
