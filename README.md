@@ -52,7 +52,7 @@ To remove the application and stop background processes:
 
 ## Features
 
-- **Menu Bar & Status Item**: Instant access from the macOS menu bar (`DSH`) with live status indicators (Running, Starting, Stopped).
+- 🐋 **Menu Bar & Status Item**: Instant access from the macOS menu bar (🐋 DSH) with live status indicators (🟢 Running, 🟡 Starting, ⚪ Stopped).
 - **Central Control Window**: High-resolution GUI panel displaying active workspace, server state, quick action buttons, and configuration options.
 - **Interactive Terminal Session**: Opens a native terminal window pre-configured with workspace paths, `$PATH` discovery, and active API credentials.
 - **Headless Task Launcher**: Run ad-hoc AI tasks on demand (`dsh --profile headless "<task>"`) with a native prompt dialog.
@@ -60,6 +60,7 @@ To remove the application and stop background processes:
 - **Smart Environment Discovery**: Automatically locates `node` (>= 22.19.0) and `pnpm` across Homebrew (`/opt/homebrew`, `/usr/local`), `nvm`, `asdf`, `proto`, `fnm`, and `volta`.
 - **Secure Key Management**: Prompt and store `DEEPSEEK_API_KEY` securely in `~/.dsh/.env` or repository `.env`.
 - **Clean Lifecycle & Teardown**: Guarantees background Node and server processes are cleanly terminated upon exit.
+- **Zero Telemetry & Private**: No analytics, telemetry, or third-party network calls. I wrote this for my own usage for quick launching via Raycast, Spotlight, or menu bar.
 
 ---
 
