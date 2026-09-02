@@ -923,7 +923,7 @@ class MainWindowController: NSWindowController {
             webButton.isEnabled = false
             openBrowserButton.isHidden = true
         case .running(_):
-            statusEmojiLabel.stringValue = "🐳"
+            statusEmojiLabel.stringValue = "🐋"
             statusLabel.stringValue = "Web Server: Running"
             statusLabel.textColor = .systemBlue
             webButton.title = "Stop Web Server"
