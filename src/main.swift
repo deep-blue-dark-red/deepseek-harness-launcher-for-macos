@@ -5,6 +5,12 @@ import Foundation
 
 struct Constants {
     static let appName = "DeepSeek Harness Launcher"
+    static let version: String = {
+        if let ver = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, !ver.isEmpty {
+            return ver
+        }
+        return "1.0.0"
+    }()
     static let windowTitle = "Deepseek Harness Launcher for macOS"
     static let bundleIdentifier = "com.deepseek.harness.launcher"
     static let defaultPort = "5173"
@@ -655,11 +661,17 @@ class MainWindowController: NSWindowController {
         container.autoresizingMask = [.width, .height]
         contentView.addSubview(container)
         
-        // Header Title & Subtitle
+        // Header Title & Version Tag
         let titleLabel = NSTextField(labelWithString: "DeepSeek Harness Launcher")
-        titleLabel.font = NSFont.systemFont(ofSize: 21, weight: .bold)
-        titleLabel.frame = NSRect(x: 30, y: 374, width: 410, height: 28)
+        titleLabel.font = NSFont.systemFont(ofSize: 20, weight: .bold)
+        titleLabel.frame = NSRect(x: 30, y: 374, width: 335, height: 28)
         container.addSubview(titleLabel)
+        
+        let versionLabel = NSTextField(labelWithString: "v\(Constants.version)")
+        versionLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
+        versionLabel.textColor = .tertiaryLabelColor
+        versionLabel.frame = NSRect(x: 368, y: 377, width: 75, height: 20)
+        container.addSubview(versionLabel)
         
         let subtitleLabel = NSTextField(labelWithString: "A minimal status-bar application for launching, restarting and controlling DeepSeek-Harness, written in Swift")
         subtitleLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
