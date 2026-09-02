@@ -50,6 +50,11 @@ cp "${ICON_PATH}" "${APP_BUNDLE}/Contents/Resources/AppIcon.icns"
 if [ -f "${REPO_ROOT}/resources/whale-harness.png" ]; then
     cp "${REPO_ROOT}/resources/whale-harness.png" "${APP_BUNDLE}/Contents/Resources/whale-harness.png"
 fi
+
+if command -v codesign &>/dev/null; then
+    codesign --force --deep --sign - "${APP_BUNDLE}" >/dev/null 2>&1 || true
+fi
+
 touch "${APP_BUNDLE}"
 
 echo -e "${GREEN}${BOLD}✓ Application successfully built at: ${APP_BUNDLE}${NC}"
