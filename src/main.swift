@@ -11,10 +11,13 @@ struct Constants {
         }
         return "1.0.0"
     }()
-    static let windowTitle = "Deepseek Harness Launcher for macOS"
+    static let windowTitle = "DeepSeek Harness — Control Panel"
     static let bundleIdentifier = "com.deepseek.harness.launcher"
-    static let defaultPort = "5173"
+    static let defaultPort = "3080"
     static let defaultProfile = "web"
+    /// How long to wait for the server to advertise its URL before assuming the
+    /// default loopback address rather than leaving the UI stuck in "Starting".
+    static let startupTimeout: TimeInterval = 90
     static let githubUrl = "https://github.com/deepseek-ai/deepseek-harness"
     static let authorUrl = "https://github.com/deep-blue-dark-red/deepseek-harness-launcher-for-macos"
     static let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
@@ -41,56 +44,77 @@ class EnvironmentManager {
     }
     
     static func resolvePath() -> String {
-        var paths = [
-            "/opt/homebrew/bin",
-            "/opt/homebrew/sbin",
-            "/usr/local/bin",
-            "/usr/local/sbin",
-            "/usr/bin",
-            "/bin",
-            "/usr/sbin",
-            "/sbin"
-        ]
-        
+        var ordered: [String] = []
+        var seen = Set<String>()
+        func append(_ dir: String) {
+            guard !dir.isEmpty, !seen.contains(dir) else { return }
+            seen.insert(dir)
+            ordered.append(dir)
+        }
+
+        // The login shell's own PATH comes first, in the order the user set it,
+        // so version managers keep the precedence they were configured with.
+        for dir in loginShellPath() {
+            append(dir)
+        }
+
+        // Well-known locations follow as a fallback for launches where the shell
+        // probe found nothing (a Finder launch with an unusual $SHELL, say).
+        for dir in ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", "/usr/local/sbin",
+                    "/usr/bin", "/bin", "/usr/sbin", "/sbin"] {
+            append(dir)
+        }
+
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        paths.append("\(home)/.local/bin")
-        paths.append("\(home)/.cargo/bin")
-        paths.append("\(home)/.proto/shims")
-        paths.append("\(home)/.proto/bin")
-        paths.append("\(home)/.asdf/shims")
-        paths.append("\(home)/.asdf/bin")
-        paths.append("\(home)/.fnm/current/bin")
-        paths.append("\(home)/.volta/bin")
-        
+        for suffix in [".local/bin", ".cargo/bin", ".proto/shims", ".proto/bin",
+                       ".asdf/shims", ".asdf/bin", ".fnm/current/bin", ".volta/bin"] {
+            append("\(home)/\(suffix)")
+        }
+
         let nvmDir = "\(home)/.nvm/versions/node"
         if let contents = try? FileManager.default.contentsOfDirectory(atPath: nvmDir) {
-            let sorted = contents.sorted().reversed()
-            for version in sorted {
-                paths.append("\(nvmDir)/\(version)/bin")
+            for version in contents.sorted().reversed() {
+                append("\(nvmDir)/\(version)/bin")
             }
         }
-        
+
+        return ordered.joined(separator: ":")
+    }
+
+    /// Reads `$PATH` from a login shell. Bounded by a timeout: a slow or hanging
+    /// rc file must not stall app launch indefinitely.
+    private static func loginShellPath(timeout: TimeInterval = 3.0) -> [String] {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        guard FileManager.default.isExecutableFile(atPath: shell) else { return [] }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: shell)
         process.arguments = ["-l", "-c", "echo $PATH"]
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = Pipe()
-        if (try? process.run()) != nil {
-            process.waitUntilExit()
-            if process.terminationStatus == 0 {
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                if let shellPath = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) {
-                    let parts = shellPath.components(separatedBy: ":")
-                    for p in parts where !paths.contains(p) && !p.isEmpty {
-                        paths.insert(p, at: 0)
-                    }
-                }
-            }
+        guard (try? process.run()) != nil else { return [] }
+
+        // Drain the pipe off the calling thread so a chatty profile that fills the
+        // pipe buffer cannot deadlock against waitUntilExit().
+        final class Box { var data = Data() }
+        let box = Box()
+        let finished = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            box.data = pipe.fileHandleForReading.readDataToEndOfFile()
+            finished.signal()
         }
-        
-        return paths.joined(separator: ":")
+
+        if finished.wait(timeout: .now() + timeout) == .timedOut {
+            process.terminate()
+            kill(process.processIdentifier, SIGKILL)
+            return []
+        }
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0,
+              let text = String(data: box.data, encoding: .utf8) else { return [] }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: ":")
     }
     
     static func findBinary(named name: String, path: String) -> String? {
@@ -172,71 +196,11 @@ class EnvironmentManager {
         UserDefaults.standard.set(newPath, forKey: "DSH_REPO_ROOT")
     }
     
-    func getApiKey() -> String? {
-        if let key = ProcessInfo.processInfo.environment["DEEPSEEK_API_KEY"], !key.isEmpty {
-            return key
-        }
-        
-        let envPath = "\(repoRoot)/.env"
-        if let contents = try? String(contentsOfFile: envPath, encoding: .utf8) {
-            for line in contents.components(separatedBy: .newlines) {
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if trimmed.hasPrefix("DEEPSEEK_API_KEY=") {
-                    let value = String(trimmed.dropFirst("DEEPSEEK_API_KEY=".count))
-                        .trimmingCharacters(in: CharacterSet(charactersIn: "\"'\t "))
-                    if !value.isEmpty { return value }
-                }
-            }
-        }
-        
-        let homeEnv = "\(FileManager.default.homeDirectoryForCurrentUser.path)/.dsh/.env"
-        if let contents = try? String(contentsOfFile: homeEnv, encoding: .utf8) {
-            for line in contents.components(separatedBy: .newlines) {
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if trimmed.hasPrefix("DEEPSEEK_API_KEY=") {
-                    let value = String(trimmed.dropFirst("DEEPSEEK_API_KEY=".count))
-                        .trimmingCharacters(in: CharacterSet(charactersIn: "\"'\t "))
-                    if !value.isEmpty { return value }
-                }
-            }
-        }
-        
-        return nil
-    }
-    
-    func saveApiKey(_ key: String) -> Bool {
-        let dshDir = "\(FileManager.default.homeDirectoryForCurrentUser.path)/.dsh"
-        try? FileManager.default.createDirectory(atPath: dshDir, withIntermediateDirectories: true)
-        
-        let envPath = "\(dshDir)/.env"
-        var lines: [String] = []
-        if let contents = try? String(contentsOfFile: envPath, encoding: .utf8) {
-            lines = contents.components(separatedBy: .newlines).filter {
-                !$0.trimmingCharacters(in: .whitespaces).hasPrefix("DEEPSEEK_API_KEY=")
-            }
-        }
-        lines.append("DEEPSEEK_API_KEY=\(key)")
-        let output = lines.joined(separator: "\n") + "\n"
-        
-        do {
-            try output.write(toFile: envPath, atomically: true, encoding: String.Encoding.utf8)
-            let repoEnv = "\(repoRoot)/.env"
-            if FileManager.default.fileExists(atPath: repoEnv) {
-                var repoLines: [String] = []
-                if let repoContents = try? String(contentsOfFile: repoEnv, encoding: .utf8) {
-                    repoLines = repoContents.components(separatedBy: .newlines).filter {
-                        !$0.trimmingCharacters(in: .whitespaces).hasPrefix("DEEPSEEK_API_KEY=")
-                    }
-                }
-                repoLines.append("DEEPSEEK_API_KEY=\(key)")
-                try? (repoLines.joined(separator: "\n") + "\n").write(toFile: repoEnv, atomically: true, encoding: String.Encoding.utf8)
-            }
-            return true
-        } catch {
-            return false
-        }
-    }
-    
+    // Credentials are deliberately not handled here. DeepSeek Harness owns its own
+    // write-only credential store ($DSH_HOME/.credentials.yaml, configurable from the
+    // Providers page in the web UI) and also honours an ambient $DEEPSEEK_API_KEY.
+    // The launcher reads, writes and forwards no secrets.
+
     func checkBuildArtifacts() -> Bool {
         let dist = "\(repoRoot)/apps/web/dist/index.html"
         return FileManager.default.fileExists(atPath: dist)
@@ -282,6 +246,11 @@ class ServerManager: NSObject {
     private var stdoutPipe: Pipe?
     private var logFileHandle: FileHandle?
     private(set) var currentWebUrl: String?
+    private(set) var currentPort: String = Constants.defaultPort
+
+    /// Trailing partial line from the last pipe read, held until its newline arrives.
+    private var pendingOutput = ""
+    private var startupTimeoutWork: DispatchWorkItem?
     
     func appendLogLine(_ line: String) {
         logHistory.append(line)
@@ -310,7 +279,10 @@ class ServerManager: NSObject {
     }
     
     static func killLingeringServerProcesses() {
-        let ports = ["3080", "5173"]
+        // Only the port `dsh web` actually serves on. 5173 used to be swept too,
+        // but the harness never binds it, so that could only kill an unrelated
+        // Vite dev server belonging to the user.
+        let ports = [Constants.defaultPort]
         for port in ports {
             let task = Process()
             task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
@@ -333,26 +305,29 @@ class ServerManager: NSObject {
     }
     
     func startWebServer(port: String = Constants.defaultPort) {
-        guard case .stopped = status else { return }
-        
+        // A previous failure must not wedge the launcher: starting is allowed from
+        // .error as well as .stopped, so the "Retry" button actually retries.
+        switch status {
+        case .starting, .running:
+            return
+        case .stopped, .error:
+            break
+        }
+
         let env = EnvironmentManager.shared
         guard let pnpm = env.pnpmPath else {
             self.status = .error(message: "pnpm not found in PATH. Please install Node.js and pnpm.")
             return
         }
-        
-        guard env.getApiKey() != nil else {
-            self.status = .error(message: "DEEPSEEK_API_KEY is not configured.")
-            return
-        }
-        
-        // Clean up any stale processes on port 3080 or 5173 before starting
+
+        // Clean up any stale process left holding the web port before starting
         ServerManager.killLingeringServerProcesses()
         usleep(150_000)
-        
+
         self.status = .starting
         self.currentWebUrl = nil
-        
+        self.pendingOutput = ""
+
         let logFilePath = Constants.logsDirectory.appendingPathComponent("dsh-web.log")
         FileManager.default.createFile(atPath: logFilePath.path, contents: nil)
         self.logFileHandle = try? FileHandle(forWritingTo: logFilePath)
@@ -361,17 +336,18 @@ class ServerManager: NSObject {
         proc.executableURL = URL(fileURLWithPath: pnpm)
         proc.currentDirectoryURL = URL(fileURLWithPath: env.repoRoot)
         
+        let requestedPort = port.trimmingCharacters(in: .whitespaces)
+        self.currentPort = requestedPort.isEmpty ? Constants.defaultPort : requestedPort
+
         var procArgs = ["dsh", "web"]
-        if !port.isEmpty && port != "default" && port != "5173" {
-            procArgs.append(contentsOf: ["--port", port])
+        if self.currentPort != Constants.defaultPort {
+            procArgs.append(contentsOf: ["--port", self.currentPort])
         }
         proc.arguments = procArgs
-        
+
+        // No credentials are injected: the harness resolves its own API key.
         var procEnv = ProcessInfo.processInfo.environment
         procEnv["PATH"] = env.pathEnvironment
-        if let key = env.getApiKey() {
-            procEnv["DEEPSEEK_API_KEY"] = key
-        }
         proc.environment = procEnv
         
         let pipe = Pipe()
@@ -386,24 +362,23 @@ class ServerManager: NSObject {
         outHandle.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty, let self = self else { return }
-            
+
             try? self.logFileHandle?.write(contentsOf: data)
-            
+
             if let text = String(data: data, encoding: .utf8) {
-                let lines = text.components(separatedBy: .newlines)
-                for line in lines where !line.isEmpty {
-                    DispatchQueue.main.async {
-                        self.appendLogLine(line)
-                        self.parseOutputLine(line)
-                    }
+                DispatchQueue.main.async {
+                    self.ingestOutput(text)
                 }
             }
         }
-        
+
         proc.terminationHandler = { [weak self] p in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.stdoutPipe?.fileHandleForReading.readabilityHandler = nil
+                self.flushPendingOutput()
+                self.cancelStartupTimeout()
+                TaskMonitor.shared.stop()
                 try? self.logFileHandle?.close()
                 self.logFileHandle = nil
                 self.process = nil
@@ -411,39 +386,148 @@ class ServerManager: NSObject {
                 self.status = .stopped
             }
         }
-        
+
         do {
             try proc.run()
+            scheduleStartupTimeout()
         } catch {
             let errMsg = "Failed to start process: \(error.localizedDescription)"
             appendLogLine(">>> Error: \(errMsg)")
             self.status = .error(message: errMsg)
         }
     }
-    
-    private func parseOutputLine(_ line: String) {
-        if line.contains("http://127.0.0.1") || line.contains("http://localhost") {
-            let parts = line.components(separatedBy: .whitespaces)
-            for part in parts {
-                if let url = URL(string: part), (url.scheme == "http" || url.scheme == "https"),
-                   url.host == "127.0.0.1" || url.host == "localhost" {
-                    DispatchQueue.main.async {
-                        self.currentWebUrl = url.absoluteString
-                        self.status = .running(url: url.absoluteString)
-                    }
-                    return
-                }
-            }
+
+    // MARK: Output handling
+
+    /// Buffers reads into whole lines. `availableData` splits on arbitrary byte
+    /// boundaries, so a URL can otherwise arrive cut in half and never be matched.
+    private func ingestOutput(_ chunk: String) {
+        pendingOutput += chunk
+        while let breakIndex = pendingOutput.firstIndex(where: { $0 == "\n" || $0 == "\r" }) {
+            let line = String(pendingOutput[pendingOutput.startIndex..<breakIndex])
+            pendingOutput = String(pendingOutput[pendingOutput.index(after: breakIndex)...])
+            handleOutputLine(line)
+        }
+        // Servers often print the URL on a line they leave open; match it early
+        // without consuming the buffer, so the final newline still logs it once.
+        if !pendingOutput.isEmpty {
+            parseOutputLine(ServerManager.stripAnsiCodes(pendingOutput))
         }
     }
-    
+
+    private func flushPendingOutput() {
+        guard !pendingOutput.isEmpty else { return }
+        let remainder = pendingOutput
+        pendingOutput = ""
+        handleOutputLine(remainder)
+    }
+
+    private func handleOutputLine(_ rawLine: String) {
+        let line = ServerManager.stripAnsiCodes(rawLine)
+        if !line.trimmingCharacters(in: .whitespaces).isEmpty {
+            appendLogLine(line)
+        }
+        parseOutputLine(line)
+    }
+
+    /// Removes ANSI CSI/OSC escape sequences. Vite and friends wrap their URLs in
+    /// colour codes, which both corrupt the log view and defeat URL parsing.
+    static func stripAnsiCodes(_ text: String) -> String {
+        guard text.contains("\u{1B}") else { return text }
+        let chars = Array(text)
+        var out = ""
+        out.reserveCapacity(chars.count)
+        var i = 0
+        while i < chars.count {
+            guard chars[i] == "\u{1B}", i + 1 < chars.count else {
+                if chars[i] != "\u{1B}" { out.append(chars[i]) }
+                i += 1
+                continue
+            }
+            switch chars[i + 1] {
+            case "[":
+                // CSI: parameter/intermediate bytes, then a final byte in @...~
+                var j = i + 2
+                while j < chars.count, !("@"..."~").contains(chars[j]) { j += 1 }
+                i = min(j + 1, chars.count)
+            case "]":
+                // OSC: terminated by BEL or ST (ESC \)
+                var j = i + 2
+                while j < chars.count {
+                    if chars[j] == "\u{07}" { j += 1; break }
+                    if chars[j] == "\u{1B}", j + 1 < chars.count, chars[j + 1] == "\\" { j += 2; break }
+                    j += 1
+                }
+                i = j
+            default:
+                i += 2
+            }
+        }
+        return out
+    }
+
+    /// Extracts the first loopback URL in a line, tolerating surrounding prose and
+    /// trailing punctuation (`➜  Local:   http://127.0.0.1:3080/`).
+    static func firstLoopbackURL(in line: String) -> String? {
+        let stops: Set<Character> = [" ", "\t", "\"", "'", "<", ">", "(", ")"]
+        for host in ["127.0.0.1", "localhost"] {
+            for scheme in ["http://", "https://"] {
+                guard let range = line.range(of: scheme + host) else { continue }
+                var end = range.upperBound
+                while end < line.endIndex, !stops.contains(line[end]) {
+                    end = line.index(after: end)
+                }
+                var candidate = String(line[range.lowerBound..<end])
+                while let last = candidate.last, ".,;:".contains(last) {
+                    candidate.removeLast()
+                }
+                if URL(string: candidate) != nil { return candidate }
+            }
+        }
+        return nil
+    }
+
+    private func parseOutputLine(_ line: String) {
+        guard case .starting = status else { return }
+        guard let url = ServerManager.firstLoopbackURL(in: line) else { return }
+        cancelStartupTimeout()
+        self.currentWebUrl = url
+        self.status = .running(url: url)
+        // The URL carries the one-time token the API needs to authenticate.
+        TaskMonitor.shared.start(webUrl: url)
+    }
+
+    // MARK: Startup watchdog
+
+    /// Without this, a server whose banner we fail to recognise leaves the UI in
+    /// "Starting..." forever. Assume the conventional URL instead of hanging.
+    private func scheduleStartupTimeout() {
+        cancelStartupTimeout()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self, case .starting = self.status else { return }
+            let assumed = "http://127.0.0.1:\(self.currentPort)"
+            self.appendLogLine(">>> No server URL seen after \(Int(Constants.startupTimeout))s; assuming \(assumed). Check the log above if the page does not load.")
+            self.currentWebUrl = assumed
+            self.status = .running(url: assumed)
+        }
+        startupTimeoutWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Constants.startupTimeout, execute: work)
+    }
+
+    private func cancelStartupTimeout() {
+        startupTimeoutWork?.cancel()
+        startupTimeoutWork = nil
+    }
+
     func stopWebServer() {
+        cancelStartupTimeout()
+        TaskMonitor.shared.stop()
         guard let proc = process, proc.isRunning else {
             ServerManager.killLingeringServerProcesses()
             self.status = .stopped
             return
         }
-        
+
         appendLogLine(">>> Stopping DeepSeek Harness Web server...")
         let pid = proc.processIdentifier
         kill(-pid, SIGTERM)
@@ -468,8 +552,476 @@ class ServerManager: NSObject {
     func openInBrowser() {
         if let urlStr = currentWebUrl, let url = URL(string: urlStr) {
             NSWorkspace.shared.open(url)
-        } else if let url = URL(string: "http://127.0.0.1:5173") {
+        } else if let url = URL(string: "http://127.0.0.1:\(currentPort)") {
             NSWorkspace.shared.open(url)
+        }
+    }
+}
+
+// MARK: - Harness API Client
+
+/// Minimal read-only client for the harness's `/api` RPC surface.
+///
+/// The transport is an internal contract with no stability guarantee; it was
+/// derived from the gateway's own validation errors:
+///
+///   * the launch token is *not* accepted as an `/api` query parameter — fetching
+///     the tokenized index URL exchanges it for a session cookie (a 303),
+///   * endpoints live at `/api/<endpoint>` and `method` must equal that exact
+///     endpoint string (`session/list`, not `session.list`),
+///   * arguments nest under `payload.args`, keyed `_request` for `session/list`
+///     and `request` for `session/page`.
+///
+/// Every failure path returns nil rather than throwing: a harness update may
+/// change any of the above, and launching/stopping the server must keep working
+/// even when monitoring cannot.
+final class HarnessAPIClient {
+    struct TokenUsage {
+        var input = 0
+        var output = 0
+
+        static func + (lhs: TokenUsage, rhs: TokenUsage) -> TokenUsage {
+            TokenUsage(input: lhs.input + rhs.input, output: lhs.output + rhs.output)
+        }
+    }
+
+    struct SessionSummary {
+        let sessionId: String
+        let running: Bool
+        let blank: Bool
+        let cwd: String?
+        let title: String?
+        /// Goal continuation phase: `active`, `paused`, `blocked`, or `complete`.
+        let goalPhase: String?
+        /// Human-readable explanation, present exactly while the goal is blocked.
+        let goalBlockedReason: String?
+        /// Fallback label when a session has no title yet.
+        let goalObjective: String?
+        let usage: TokenUsage
+    }
+
+    private let baseURL: URL
+    private let tokenURL: URL
+    private let urlSession: URLSession
+    private var authenticated = false
+
+    /// - Parameter webUrl: the tokenized URL the server prints at startup.
+    ///   Returns nil when it carries no `token`, since the cookie exchange
+    ///   cannot be completed without one.
+    init?(webUrl: String) {
+        guard let url = URL(string: webUrl),
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let token = components.queryItems?.first(where: { $0.name == "token" })?.value,
+              !token.isEmpty else { return nil }
+        self.tokenURL = url
+        components.query = nil
+        components.path = "/"
+        guard let base = components.url else { return nil }
+        self.baseURL = base
+
+        // Ephemeral: an isolated cookie jar, so the launcher never touches the
+        // user's shared cookie storage.
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpShouldSetCookies = true
+        configuration.timeoutIntervalForRequest = 10
+        self.urlSession = URLSession(configuration: configuration)
+    }
+
+    private func authenticateIfNeeded() async -> Bool {
+        if authenticated { return true }
+        guard let (_, response) = try? await urlSession.data(from: tokenURL),
+              let http = response as? HTTPURLResponse, http.statusCode < 400 else { return false }
+        authenticated = true
+        return true
+    }
+
+    /// Returns the `result` object, whether it reports success or a gateway error.
+    private func rpc(_ endpoint: String, args: [String: Any]) async -> [String: Any]? {
+        guard await authenticateIfNeeded(),
+              let url = URL(string: "api/\(endpoint)", relativeTo: baseURL) else { return nil }
+        let body: [String: Any] = [
+            "type": "client-request",
+            "rpcId": UUID().uuidString,
+            "method": endpoint,
+            "payload": ["args": args],
+        ]
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        guard let (data, _) = try? await urlSession.data(for: request),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return root["result"] as? [String: Any]
+    }
+
+    /// Cold-safe: listing does not activate an agent, so this is cheap to poll.
+    func listSessions() async -> [SessionSummary]? {
+        guard let result = await rpc("session/list", args: ["_request": [:]]),
+              result["ok"] as? Bool == true,
+              let value = result["value"] as? [String: Any],
+              let items = value["items"] as? [[String: Any]] else { return nil }
+
+        return items.compactMap { item in
+            guard let id = item["sessionId"] as? String else { return nil }
+            let projections = (item["projections"] as? [String: Any])?["values"] as? [String: Any]
+            let goal = projections?["goal"] as? [String: Any]
+
+            // Cache reads and writes are still input the model was billed for, so
+            // they belong in the inbound total rather than being dropped.
+            var usage = TokenUsage()
+            if let raw = projections?["tokenUsage"] as? [String: Any] {
+                let uncached = raw["uncachedInputTokens"] as? Int ?? 0
+                let cacheRead = raw["cacheReadTokens"] as? Int ?? 0
+                let cacheWrite = raw["cacheWriteTokens"] as? Int ?? 0
+                usage.input = uncached + cacheRead + cacheWrite
+                usage.output = raw["outputTokens"] as? Int ?? 0
+            }
+
+            return SessionSummary(
+                sessionId: id,
+                running: item["running"] as? Bool ?? false,
+                blank: item["blank"] as? Bool ?? false,
+                cwd: item["cwd"] as? String,
+                title: projections?["title"] as? String,
+                goalPhase: goal?["phase"] as? String,
+                goalBlockedReason: (goal?["blockedReason"] as? [String: Any])?["message"] as? String,
+                goalObjective: goal?["objective"] as? String,
+                usage: usage
+            )
+        }
+    }
+
+    /// Requests cancellation of a session's active turn. Returns true when the
+    /// harness admits the request to the live agent.
+    func cancel(sessionId: String) async -> Bool {
+        guard let result = await rpc("session/cancel", args: ["request": ["sessionId": sessionId]]) else { return false }
+        return result["ok"] as? Bool == true
+    }
+
+    /// The `kind` of the session's most recent `turn/end`, or nil when unknown.
+    ///
+    /// `completed` means the turn finished normally; every other kind
+    /// (`aborted`, `blocked`, `error`, `max-tokens`, `interrupted`, or anything a
+    /// plugin adds) means it stopped for some other reason and wants attention.
+    func lastTurnEndKind(sessionId: String) async -> String? {
+        guard let cursor = await pageCursor(sessionId: sessionId),
+              let result = await rpc("session/page", args: ["request": [
+                  "address": ["kind": "session", "sessionId": sessionId],
+                  "throughSeq": cursor,
+                  "maxMessages": 4,
+              ]]),
+              result["ok"] as? Bool == true,
+              let value = result["value"] as? [String: Any],
+              let records = value["records"] as? [Any] else { return nil }
+        return HarnessAPIClient.latestTurnEndKind(in: records)
+    }
+
+    /// Discovers the log's current cursor. `session/page` requires a `throughSeq`
+    /// no greater than the cursor, and the only way to learn it without opening a
+    /// follow stream is to over-request and read the cursor back out of the
+    /// rejection message.
+    private func pageCursor(sessionId: String) async -> Int? {
+        let probe = 2_000_000_000
+        guard let result = await rpc("session/page", args: ["request": [
+            "address": ["kind": "session", "sessionId": sessionId],
+            "throughSeq": probe,
+            "maxMessages": 1,
+        ]]) else { return nil }
+
+        if result["ok"] as? Bool == true { return probe }
+        guard let error = result["error"] as? [String: Any],
+              let message = error["message"] as? String,
+              let marker = message.range(of: "past cursor ") else { return nil }
+        return Int(message[marker.upperBound...].prefix { $0.isNumber })
+    }
+
+    /// Finds the highest-`seq` `turn/end` anywhere in a page's records, which
+    /// nest events inside chunk runs.
+    static func latestTurnEndKind(in records: [Any]) -> String? {
+        var bestSeq = Int.min
+        var kind: String?
+
+        func walk(_ node: Any) {
+            if let dictionary = node as? [String: Any] {
+                if dictionary["type"] as? String == "turn/end",
+                   let data = dictionary["data"] as? [String: Any],
+                   let reason = data["reason"] as? [String: Any],
+                   let found = reason["kind"] as? String {
+                    let seq = dictionary["seq"] as? Int ?? Int.min + 1
+                    if seq >= bestSeq {
+                        bestSeq = seq
+                        kind = found
+                    }
+                }
+                for value in dictionary.values { walk(value) }
+            } else if let array = node as? [Any] {
+                for value in array { walk(value) }
+            }
+        }
+
+        records.forEach(walk)
+        return kind
+    }
+}
+
+// MARK: - Task Monitor
+
+/// Counts of the tasks observed during the current server run.
+struct TaskCounts: Equatable {
+    var running = 0
+    var completed = 0
+    var halted = 0
+
+    var total: Int { running + completed + halted }
+    var isEmpty: Bool { total == 0 }
+}
+
+/// Tracks agent tasks by polling `session/list`.
+///
+/// Only sessions seen *running* during this server run are counted: the harness
+/// persists every session it has ever opened (20 on a typical machine, mostly
+/// blank), so counting the whole list would render the badge meaningless.
+final class TaskMonitor {
+    static let shared = TaskMonitor()
+
+    enum Outcome: Equatable {
+        case running
+        case done
+        /// Stopped for a reason other than completing — wants attention.
+        case halted(reason: String?)
+        /// The user paused the goal.
+        case paused
+        /// The goal is blocked; `reason` is the policy's human-readable message.
+        case blocked(reason: String?)
+
+        var isRunning: Bool { self == .running }
+        var isDone: Bool { self == .done }
+        /// Everything that wants the user's attention, badged 🐠.
+        var needsAttention: Bool { !isRunning && !isDone }
+
+        /// Menu marker: green tick for done, yellow fish for anything stalled.
+        var marker: String {
+            switch self {
+            case .running: return "🐋"
+            case .done: return "✅"
+            case .paused: return "⏸"
+            case .halted, .blocked: return "🐠"
+            }
+        }
+
+        var reason: String? {
+            switch self {
+            case .halted(let reason), .blocked(let reason): return reason
+            case .running, .done, .paused: return nil
+            }
+        }
+    }
+
+    struct Task {
+        let sessionId: String
+        var title: String?
+        var cwd: String?
+        var outcome: Outcome
+        var usage = HarnessAPIClient.TokenUsage()
+
+        /// Shortened label for menu rows.
+        var shortName: String {
+            let raw = (title?.isEmpty == false ? title : nil) ?? "Untitled task"
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.count <= 38 ? trimmed : String(trimmed.prefix(37)) + "…"
+        }
+    }
+
+    private(set) var counts = TaskCounts()
+    private(set) var tasks: [String: Task] = [:]
+    /// False once the API contract stops parsing, so the UI can fall back.
+    private(set) var isAvailable = false
+
+    var onChange: ((TaskCounts) -> Void)?
+
+    private var client: HarnessAPIClient?
+    private var timer: Timer?
+    private var polling = false
+    private var loggedUnavailable = false
+    /// Last published observable state, so notifications fire on any change.
+    private var lastSignature = ""
+
+    private static let pollInterval: TimeInterval = 3.0
+
+    func start(webUrl: String) {
+        stop()
+        guard let client = HarnessAPIClient(webUrl: webUrl) else {
+            reportUnavailable("the server URL carried no token, so the API cannot be authenticated")
+            return
+        }
+        self.client = client
+        timer = Timer.scheduledTimer(withTimeInterval: TaskMonitor.pollInterval, repeats: true) { [weak self] _ in
+            self?.poll()
+        }
+        poll()
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        client = nil
+        polling = false
+        loggedUnavailable = false
+        isAvailable = false
+        tasks.removeAll()
+        lastSignature = ""
+        updateCounts()
+    }
+
+    private func reportUnavailable(_ detail: String) {
+        isAvailable = false
+        guard !loggedUnavailable else { return }
+        loggedUnavailable = true
+        ServerManager.shared.appendLogLine(">>> Task monitoring unavailable: \(detail). Start/stop is unaffected.")
+        updateCounts()
+    }
+
+    private func poll() {
+        guard let client = client, !polling else { return }
+        polling = true
+
+        // Snapshot the tracked set here, on the main thread, so the background
+        // work never reads `tasks` while the main thread is mutating it.
+        let trackedRunning = Set(tasks.values.filter { $0.outcome == .running }.map(\.sessionId))
+
+        _Concurrency.Task { [weak self] in
+            // Bind once to a `let`: an optional captured var is not concurrency-safe.
+            guard let monitor = self else { return }
+            let summaries = await client.listSessions()
+
+            guard let summaries = summaries else {
+                await MainActor.run {
+                    monitor.polling = false
+                    monitor.reportUnavailable("session/list did not return a readable response")
+                }
+                return
+            }
+
+            // Resolve why each task that stopped since the last poll ended. Only
+            // transitions are resolved, so the extra call is rare.
+            let liveIds = Set(summaries.filter(\.running).map(\.sessionId))
+            var outcomes: [String: String?] = [:]
+            for id in trackedRunning where !liveIds.contains(id) {
+                outcomes[id] = await client.lastTurnEndKind(sessionId: id)
+            }
+
+            let resolved = outcomes
+            await MainActor.run {
+                monitor.apply(summaries: summaries, resolved: resolved)
+                monitor.polling = false
+            }
+        }
+    }
+
+    private func apply(summaries: [HarnessAPIClient.SessionSummary], resolved: [String: String?]) {
+        isAvailable = true
+        loggedUnavailable = false
+
+        for summary in summaries {
+            let label = summary.title ?? summary.goalObjective
+            if var existing = tasks[summary.sessionId] {
+                if let label = label { existing.title = label }
+                existing.cwd = summary.cwd ?? existing.cwd
+                existing.usage = summary.usage
+                if summary.running { existing.outcome = .running }
+                tasks[summary.sessionId] = existing
+            } else if summary.running {
+                tasks[summary.sessionId] = Task(
+                    sessionId: summary.sessionId,
+                    title: label,
+                    cwd: summary.cwd,
+                    outcome: .running,
+                    usage: summary.usage
+                )
+            }
+        }
+
+        for (id, kind) in resolved {
+            guard var task = tasks[id] else { continue }
+            // An unresolvable reason counts as done: a spurious "needs attention"
+            // badge is worse than a missed one.
+            task.outcome = (kind == nil || kind == "completed") ? .done : .halted(reason: kind)
+            tasks[id] = task
+        }
+
+        // The durable goal phase outranks the turn-end reason: a paused or
+        // blocked goal is the state the user acted on, and it survives the turn
+        // that happened to end underneath it.
+        for summary in summaries {
+            guard var task = tasks[summary.sessionId], !summary.running else { continue }
+            switch summary.goalPhase {
+            case "paused": task.outcome = .paused
+            case "blocked": task.outcome = .blocked(reason: summary.goalBlockedReason)
+            case "complete": task.outcome = .done
+            default: break
+            }
+            tasks[summary.sessionId] = task
+        }
+
+        updateCounts()
+    }
+
+    /// Inbound and outbound tokens summed across every tracked task.
+    var totalUsage: HarnessAPIClient.TokenUsage {
+        tasks.values.reduce(HarnessAPIClient.TokenUsage()) { $0 + $1.usage }
+    }
+
+    private func updateCounts() {
+        var next = TaskCounts()
+        for task in tasks.values {
+            if task.outcome.isRunning { next.running += 1 }
+            else if task.outcome.isDone { next.completed += 1 }
+            else { next.halted += 1 }
+        }
+        counts = next
+
+        // Notify on any observable change, not just the counts. Availability and
+        // per-task usage move while the counts stand still — keying only on
+        // counts left the UI rendering whatever it had at server-start time.
+        let signature = ([
+            "available:\(isAvailable)",
+            "counts:\(next.running)/\(next.completed)/\(next.halted)",
+        ] + tasks.values
+            .sorted { $0.sessionId < $1.sessionId }
+            .map { "\($0.sessionId):\($0.outcome.marker):\($0.usage.input):\($0.usage.output)" }
+        ).joined(separator: "|")
+
+        guard signature != lastSignature else { return }
+        lastSignature = signature
+        onChange?(next)
+    }
+
+    /// Every tracked task, live first, then stalled, then finished.
+    func orderedTasks(limit: Int = 8) -> [Task] {
+        func rank(_ task: Task) -> Int {
+            if task.outcome.isRunning { return 0 }
+            if task.outcome.needsAttention { return 1 }
+            return 2
+        }
+        let sorted = tasks.values.sorted {
+            rank($0) != rank($1) ? rank($0) < rank($1) : $0.shortName < $1.shortName
+        }
+        return Array(sorted.prefix(limit))
+    }
+
+    /// Asks the harness to cancel a task's active turn.
+    func halt(sessionId: String) {
+        guard let client = client else { return }
+        _Concurrency.Task {
+            let accepted = await client.cancel(sessionId: sessionId)
+            await MainActor.run {
+                ServerManager.shared.appendLogLine(
+                    accepted
+                        ? ">>> Halt requested for \(sessionId)."
+                        : ">>> Halt request for \(sessionId) was refused by the harness."
+                )
+            }
         }
     }
 }
@@ -478,17 +1030,14 @@ class ServerManager: NSObject {
 
 class HeadlessRunner {
     static func runTaskInTerminal(task: String, repoRoot: String, pathEnv: String) {
-        let env = EnvironmentManager.shared
-        let apiKey = env.getApiKey() ?? ""
         let escapedTask = task.replacingOccurrences(of: "\"", with: "\\\"")
-        
+
         let tempScript = FileManager.default.temporaryDirectory.appendingPathComponent("dsh-task-\(ProcessInfo.processInfo.globallyUniqueString.prefix(8)).command")
         let scriptContent = """
         #!/usr/bin/env bash
         # DeepSeek Harness Headless Task
         cd "\(repoRoot)"
         export PATH="\(pathEnv):$PATH"
-        export DEEPSEEK_API_KEY="\(apiKey)"
         clear
         echo -e "\\033[1;36m===================================================\\033[0m"
         echo -e "\\033[1;36m  🤖 DeepSeek Harness — Headless Task Runner\\033[0m"
@@ -512,16 +1061,12 @@ class HeadlessRunner {
     }
     
     static func openInteractiveTerminal(repoRoot: String, pathEnv: String) {
-        let env = EnvironmentManager.shared
-        let apiKey = env.getApiKey() ?? ""
-        
         let tempScript = FileManager.default.temporaryDirectory.appendingPathComponent("dsh-session-\(ProcessInfo.processInfo.globallyUniqueString.prefix(8)).command")
         let scriptContent = """
         #!/usr/bin/env bash
         # DeepSeek Harness Terminal Session
         cd "\(repoRoot)"
         export PATH="\(pathEnv):$PATH"
-        export DEEPSEEK_API_KEY="\(apiKey)"
         clear
         echo -e "\\033[1;36m===================================================\\033[0m"
         echo -e "\\033[1;36m  🐋 DeepSeek Harness — Interactive Terminal Session\\033[0m"
@@ -697,8 +1242,12 @@ class MainWindowController: NSWindowController {
     private var terminalButton: NSButton!
     private var taskButton: NSButton!
     private var logsButton: NSButton!
-    private var settingsButton: NSButton!
     private var repoPathLabel: NSTextField!
+    private var jobsTable: NSTableView!
+    private var totalsLabel: NSTextField!
+    private var haltButton: NSButton!
+    /// Snapshot backing the table, so row indices stay stable between reloads.
+    private var jobRows: [TaskMonitor.Task] = []
     private var iconImageView: NSImageView!
     private var whaleIconImage: NSImage!
     
@@ -722,7 +1271,7 @@ class MainWindowController: NSWindowController {
     
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 430),
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 640),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -736,6 +1285,18 @@ class MainWindowController: NSWindowController {
         ServerManager.shared.addStatusListener { [weak self] status in
             self?.updateServerUI(status)
         }
+
+        observeTaskMonitor()
+        refreshJobs()
+    }
+
+    /// Installed once the window exists, so job rows track the monitor.
+    func observeTaskMonitor() {
+        let previous = TaskMonitor.shared.onChange
+        TaskMonitor.shared.onChange = { [weak self] counts in
+            previous?(counts)
+            DispatchQueue.main.async { self?.refreshJobs() }
+        }
     }
     
     private func setupUI() {
@@ -748,13 +1309,13 @@ class MainWindowController: NSWindowController {
         // Header Title & Version Tag
         let titleLabel = NSTextField(labelWithString: "DeepSeek Harness Launcher")
         titleLabel.font = NSFont.systemFont(ofSize: 20, weight: .bold)
-        titleLabel.frame = NSRect(x: 30, y: 374, width: 335, height: 28)
+        titleLabel.frame = NSRect(x: 30, y: 584, width: 335, height: 28)
         container.addSubview(titleLabel)
         
         let versionLabel = NSTextField(labelWithString: "v\(Constants.version)")
         versionLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
         versionLabel.textColor = .tertiaryLabelColor
-        versionLabel.frame = NSRect(x: 368, y: 377, width: 75, height: 20)
+        versionLabel.frame = NSRect(x: 368, y: 587, width: 75, height: 20)
         container.addSubview(versionLabel)
         
         let subtitleLabel = NSTextField(labelWithString: "A minimal status-bar application for launching, restarting and controlling DeepSeek-Harness, written in Swift")
@@ -762,7 +1323,7 @@ class MainWindowController: NSWindowController {
         subtitleLabel.textColor = .secondaryLabelColor
         subtitleLabel.lineBreakMode = .byWordWrapping
         subtitleLabel.maximumNumberOfLines = 2
-        subtitleLabel.frame = NSRect(x: 30, y: 340, width: 410, height: 32)
+        subtitleLabel.frame = NSRect(x: 30, y: 550, width: 410, height: 32)
         container.addSubview(subtitleLabel)
         
         // Load whale icon
@@ -781,13 +1342,13 @@ class MainWindowController: NSWindowController {
         }
         
         // Header Icon Picture (~160 retina pixels = 80x80 pt, right-aligned to border)
-        iconImageView = NSImageView(frame: NSRect(x: 450, y: 342, width: 80, height: 80))
+        iconImageView = NSImageView(frame: NSRect(x: 450, y: 552, width: 80, height: 80))
         iconImageView.imageScaling = .scaleProportionallyUpOrDown
         iconImageView.image = whaleIconImage
         container.addSubview(iconImageView)
         
         // Status Card Box
-        let statusCard = NSBox(frame: NSRect(x: 30, y: 260, width: 500, height: 75))
+        let statusCard = NSBox(frame: NSRect(x: 30, y: 465, width: 500, height: 75))
         statusCard.titlePosition = .noTitle
         statusCard.boxType = .custom
         statusCard.cornerRadius = 10
@@ -830,8 +1391,65 @@ class MainWindowController: NSWindowController {
         openBrowserButton.isHidden = true
         statusCard.contentView?.addSubview(openBrowserButton)
         
+        // Jobs section: live task list with aggregate usage.
+        let jobsHeader = NSTextField(labelWithString: "Jobs")
+        jobsHeader.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        jobsHeader.frame = NSRect(x: 30, y: 437, width: 120, height: 18)
+        container.addSubview(jobsHeader)
+
+        totalsLabel = NSTextField(labelWithString: "")
+        totalsLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        totalsLabel.textColor = .secondaryLabelColor
+        totalsLabel.alignment = .right
+        totalsLabel.frame = NSRect(x: 240, y: 438, width: 290, height: 16)
+        container.addSubview(totalsLabel)
+
+        let jobsScroll = NSScrollView(frame: NSRect(x: 30, y: 262, width: 500, height: 168))
+        jobsScroll.hasVerticalScroller = true
+        jobsScroll.borderType = .bezelBorder
+        jobsScroll.autohidesScrollers = true
+
+        jobsTable = NSTableView(frame: jobsScroll.bounds)
+        jobsTable.usesAlternatingRowBackgroundColors = true
+        jobsTable.rowHeight = 22
+        jobsTable.allowsMultipleSelection = false
+        jobsTable.dataSource = self
+        jobsTable.delegate = self
+        jobsTable.headerView = NSTableHeaderView()
+
+        let stateColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("state"))
+        stateColumn.title = "State"
+        stateColumn.width = 74
+        jobsTable.addTableColumn(stateColumn)
+
+        let nameColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
+        nameColumn.title = "Job"
+        nameColumn.width = 268
+        jobsTable.addTableColumn(nameColumn)
+
+        let tokensColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("tokens"))
+        tokensColumn.title = "Tokens"
+        tokensColumn.width = 130
+        jobsTable.addTableColumn(tokensColumn)
+
+        jobsScroll.documentView = jobsTable
+        container.addSubview(jobsScroll)
+
+        haltButton = NSButton(title: "Halt Job", target: self, action: #selector(haltSelectedJobClicked))
+        haltButton.bezelStyle = .rounded
+        haltButton.font = NSFont.systemFont(ofSize: 12, weight: .regular)
+        haltButton.frame = NSRect(x: 30, y: 232, width: 100, height: 24)
+        haltButton.isEnabled = false
+        container.addSubview(haltButton)
+
+        let haltHint = NSTextField(labelWithString: "Select a running job to halt its active turn.")
+        haltHint.font = NSFont.systemFont(ofSize: 11)
+        haltHint.textColor = .tertiaryLabelColor
+        haltHint.frame = NSRect(x: 140, y: 236, width: 390, height: 16)
+        container.addSubview(haltHint)
+
         // Primary Action Buttons
-        let buttonY = 195
+        let buttonY = 190
         
         webButton = NSButton(title: "Start Web GUI", target: self, action: #selector(toggleWebServerClicked))
         webButton.bezelStyle = .rounded
@@ -893,12 +1511,6 @@ class MainWindowController: NSWindowController {
         separator.boxType = .separator
         container.addSubview(separator)
         
-        settingsButton = NSButton(title: "Configure API Key / Settings", target: self, action: #selector(openSettingsClicked))
-        settingsButton.bezelStyle = .inline
-        settingsButton.font = NSFont.systemFont(ofSize: 12, weight: .regular)
-        settingsButton.frame = NSRect(x: 30, y: 25, width: 220, height: 28)
-        container.addSubview(settingsButton)
-        
         let docsButton = NSButton(title: "Docs & Guides", target: self, action: #selector(openDocsClicked))
         docsButton.bezelStyle = .inline
         docsButton.font = NSFont.systemFont(ofSize: 12, weight: .regular)
@@ -907,6 +1519,9 @@ class MainWindowController: NSWindowController {
     }
     
     private func updateServerUI(_ status: ServerStatus) {
+        // The jobs panel's wording depends on server state, so keep it in step.
+        refreshJobs()
+
         switch status {
         case .stopped:
             statusEmojiLabel.stringValue = "🦑"
@@ -919,8 +1534,9 @@ class MainWindowController: NSWindowController {
             statusEmojiLabel.stringValue = "🐡"
             statusLabel.stringValue = "Web Server: Starting..."
             statusLabel.textColor = .systemYellow
-            webButton.title = "Starting..."
-            webButton.isEnabled = false
+            // Stays enabled: a startup that stalls must still be cancellable.
+            webButton.title = "Cancel Start"
+            webButton.isEnabled = true
             openBrowserButton.isHidden = true
         case .running(_):
             statusEmojiLabel.stringValue = "🐋"
@@ -940,15 +1556,10 @@ class MainWindowController: NSWindowController {
     }
     
     @objc private func toggleWebServerClicked() {
-        let env = EnvironmentManager.shared
-        if env.getApiKey() == nil {
-            promptForApiKey()
-            return
-        }
-        
-        if case .running = ServerManager.shared.status {
+        switch ServerManager.shared.status {
+        case .running, .starting:
             ServerManager.shared.stopWebServer()
-        } else {
+        case .stopped, .error:
             ServerManager.shared.startWebServer()
         }
     }
@@ -989,10 +1600,56 @@ class MainWindowController: NSWindowController {
         NSApp.activate(ignoringOtherApps: true)
     }
     
-    @objc private func openSettingsClicked() {
-        promptForApiKey()
+    /// Repopulates the jobs table and the aggregate usage line.
+    func refreshJobs() {
+        guard jobsTable != nil else { return }
+        let monitor = TaskMonitor.shared
+        let selectedId = jobsTable.selectedRow >= 0 && jobsTable.selectedRow < jobRows.count
+            ? jobRows[jobsTable.selectedRow].sessionId
+            : nil
+
+        jobRows = monitor.orderedTasks(limit: 200)
+        jobsTable.reloadData()
+
+        if let selectedId = selectedId,
+           let row = jobRows.firstIndex(where: { $0.sessionId == selectedId }) {
+            jobsTable.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        }
+        updateHaltButton()
+
+        let usage = monitor.totalUsage
+        if monitor.isAvailable {
+            let counts = monitor.counts
+            totalsLabel.stringValue = "\(counts.total) job(s)   ↓ \(AppDelegate.abbreviateTokens(usage.input)) in   ↑ \(AppDelegate.abbreviateTokens(usage.output)) out"
+        } else {
+            switch ServerManager.shared.status {
+            case .running: totalsLabel.stringValue = "Connecting to the harness API…"
+            case .starting: totalsLabel.stringValue = "Server starting…"
+            case .stopped, .error: totalsLabel.stringValue = "Server not running"
+            }
+        }
     }
-    
+
+    private func updateHaltButton() {
+        let row = jobsTable.selectedRow
+        haltButton.isEnabled = row >= 0 && row < jobRows.count && jobRows[row].outcome.isRunning
+    }
+
+    @objc private func haltSelectedJobClicked() {
+        let row = jobsTable.selectedRow
+        guard row >= 0, row < jobRows.count else { return }
+        let job = jobRows[row]
+
+        let alert = NSAlert()
+        alert.messageText = "Halt this job?"
+        alert.informativeText = "\"\(job.shortName)\" will have its active turn cancelled. Work already done is kept."
+        alert.addButton(withTitle: "Halt")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        TaskMonitor.shared.halt(sessionId: job.sessionId)
+    }
+
     @objc private func openDocsClicked() {
         if let url = URL(string: Constants.githubUrl) {
             NSWorkspace.shared.open(url)
@@ -1030,49 +1687,67 @@ class MainWindowController: NSWindowController {
         }
     }
     
-    private func promptForApiKey() {
-        let env = EnvironmentManager.shared
-        let currentKey = env.getApiKey() ?? ""
-        
-        let alert = NSAlert()
-        alert.messageText = "DeepSeek API Configuration"
-        alert.informativeText = "Enter your DEEPSEEK_API_KEY. It will be saved securely in ~/.dsh/.env and used for sessions."
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Cancel")
-        
-        let stack = NSStackView(frame: NSRect(x: 0, y: 0, width: 380, height: 80))
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 8
-        
-        let input = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 380, height: 24))
-        input.placeholderString = "sk-..."
-        input.stringValue = currentKey
-        
-        let repoLabel = NSTextField(labelWithString: "DSH Folder: \(env.repoRoot)")
-        repoLabel.font = NSFont.systemFont(ofSize: 11)
-        repoLabel.textColor = .secondaryLabelColor
-        
-        stack.addArrangedSubview(input)
-        stack.addArrangedSubview(repoLabel)
-        alert.accessoryView = stack
-        
-        let response = alert.runModal()
-        if response == .alertFirstButtonReturn {
-            let newKey = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !newKey.isEmpty {
-                _ = env.saveApiKey(newKey)
-            }
+}
+
+// MARK: - Jobs Table
+
+extension MainWindowController: NSTableViewDataSource, NSTableViewDelegate {
+    func numberOfRows(in tableView: NSTableView) -> Int { jobRows.count }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard row < jobRows.count, let column = tableColumn else { return nil }
+        let job = jobRows[row]
+
+        let text: String
+        var monospaced = false
+        switch column.identifier.rawValue {
+        case "state":
+            text = job.outcome.marker + " " + MainWindowController.stateLabel(job.outcome)
+        case "name":
+            let reason = job.outcome.reason.map { " (\($0))" } ?? ""
+            text = job.shortName + reason
+        default:
+            text = "↓ \(AppDelegate.abbreviateTokens(job.usage.input))  ↑ \(AppDelegate.abbreviateTokens(job.usage.output))"
+            monospaced = true
+        }
+
+        let field = NSTextField(labelWithString: text)
+        field.font = monospaced
+            ? NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+            : NSFont.systemFont(ofSize: 12)
+        field.lineBreakMode = .byTruncatingTail
+        field.toolTip = job.cwd
+        return field
+    }
+
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        updateHaltButton()
+    }
+
+    static func stateLabel(_ outcome: TaskMonitor.Outcome) -> String {
+        switch outcome {
+        case .running: return "Running"
+        case .done: return "Done"
+        case .paused: return "Paused"
+        case .blocked: return "Blocked"
+        case .halted: return "Halted"
         }
     }
 }
 
 // MARK: - App Delegate & Menu Bar Integration
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+    func menuWillOpen(_ menu: NSMenu) {
+        refreshStatusPresentation()
+    }
+
     private var statusItem: NSStatusItem!
     private var statusMenu: NSMenu!
+    private var startWebItem: NSMenuItem?
+    /// Separator closing the summary section, so its rows can be rebuilt in place.
+    private var summarySectionEnd: NSMenuItem?
+    private var summaryMenuItems: [NSMenuItem] = []
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
@@ -1089,12 +1764,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         statusMenu = NSMenu()
         
-        let titleItem = NSMenuItem(title: "DeepSeek Harness Launcher", action: nil, keyEquivalent: "")
-        titleItem.isEnabled = false
-        statusMenu.addItem(titleItem)
-        statusMenu.addItem(NSMenuItem.separator())
+        // Summary statistics and task rows are rebuilt in place above this
+        // separator. Everything below it is fixed.
+        summarySectionEnd = NSMenuItem.separator()
+        summarySectionEnd.map { statusMenu.addItem($0) }
         
-        let openGuiItem = NSMenuItem(title: "Open Launcher Window", action: #selector(showMainWindow), keyEquivalent: "o")
+        // Opening the browser is the action that actually gets used, so it leads.
+        let browserItem = NSMenuItem(title: "Open Browser", action: #selector(openBrowserFromMenu), keyEquivalent: "b")
+        browserItem.target = self
+        statusMenu.addItem(browserItem)
+
+        let openGuiItem = NSMenuItem(title: "Control Panel", action: #selector(showMainWindow), keyEquivalent: "o")
         openGuiItem.target = self
         statusMenu.addItem(openGuiItem)
         
@@ -1102,9 +1782,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         startWebItem.target = self
         statusMenu.addItem(startWebItem)
         
-        let browserItem = NSMenuItem(title: "Open in Browser", action: #selector(openBrowserFromMenu), keyEquivalent: "b")
-        browserItem.target = self
-        statusMenu.addItem(browserItem)
         
         let terminalItem = NSMenuItem(title: "Open Terminal Session", action: #selector(openTerminalFromMenu), keyEquivalent: "t")
         terminalItem.target = self
@@ -1120,23 +1797,138 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         quitItem.target = self
         statusMenu.addItem(quitItem)
         
+        // Rebuild on open so the rows are never a stale snapshot, whatever the
+        // polling cadence happens to be.
+        statusMenu.delegate = self
         statusItem.menu = statusMenu
         
-        ServerManager.shared.addStatusListener { [weak self] status in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                switch status {
-                case .running(_):
-                    self.statusItem.button?.title = "🐋 DSH"
-                    startWebItem.title = "Stop Web Server"
-                case .starting:
-                    self.statusItem.button?.title = "🐡 DSH"
-                    startWebItem.title = "Starting..."
-                case .stopped, .error:
-                    self.statusItem.button?.title = "🦑 DSH"
-                    startWebItem.title = "Start Web Server"
-                }
+        self.startWebItem = startWebItem
+
+        ServerManager.shared.addStatusListener { [weak self] _ in
+            DispatchQueue.main.async { self?.refreshStatusPresentation() }
+        }
+
+        TaskMonitor.shared.onChange = { [weak self] _ in
+            DispatchQueue.main.async { self?.refreshStatusPresentation() }
+        }
+    }
+
+    /// Builds the status-item badge.
+    ///
+    /// While the server runs the badge reads `<whale> <completed>|<total>`, with
+    /// 🐋 when any task is live and 🐳 when all are idle, plus a trailing `🐠<n>`
+    /// for tasks that stopped for any reason other than completing.
+    static func statusTitle(for status: ServerStatus, counts: TaskCounts) -> String {
+        switch status {
+        case .stopped, .error:
+            return "🦑 DSH"
+        case .starting:
+            return "🐡 DSH"
+        case .running:
+            guard !counts.isEmpty else { return "🐳 DSH" }
+            let whale = counts.running > 0 ? "🐋" : "🐳"
+            let badge = "\(whale) \(counts.completed)|\(counts.total)"
+            return counts.halted > 0 ? "\(badge) 🐠\(counts.halted)" : badge
+        }
+    }
+
+    private func refreshStatusPresentation() {
+        let status = ServerManager.shared.status
+        statusItem.button?.title = AppDelegate.statusTitle(for: status, counts: TaskMonitor.shared.counts)
+
+        switch status {
+        case .running: startWebItem?.title = "Stop Web Server"
+        case .starting: startWebItem?.title = "Cancel Start"
+        case .stopped, .error: startWebItem?.title = "Start Web Server"
+        }
+
+        rebuildTaskSection()
+    }
+
+    /// Compact token count: 1234 -> "1.2k", 1234567 -> "1.2M".
+    static func abbreviateTokens(_ value: Int) -> String {
+        switch value {
+        case ..<1_000: return "\(value)"
+        case ..<1_000_000: return String(format: "%.1fk", Double(value) / 1_000)
+        default: return String(format: "%.1fM", Double(value) / 1_000_000)
+        }
+    }
+
+    /// A menu row with its trailing text right-aligned in a fixed column.
+    private static func columnedTitle(_ leading: String, trailing: String) -> NSAttributedString {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.tabStops = [NSTextTab(textAlignment: .right, location: 340)]
+        return NSAttributedString(
+            string: "\(leading)\t\(trailing)",
+            attributes: [
+                .paragraphStyle: paragraph,
+                .font: NSFont.menuFont(ofSize: 13),
+            ]
+        )
+    }
+
+    /// Rebuilds the summary statistics and task rows above the first separator.
+    private func rebuildTaskSection() {
+        for item in summaryMenuItems where statusMenu.index(of: item) >= 0 {
+            statusMenu.removeItem(item)
+        }
+        summaryMenuItems.removeAll()
+
+        guard let end = summarySectionEnd, statusMenu.index(of: end) >= 0 else { return }
+        var insertAt = 0
+
+        func add(_ item: NSMenuItem) {
+            statusMenu.insertItem(item, at: insertAt)
+            summaryMenuItems.append(item)
+            insertAt += 1
+        }
+
+        let monitor = TaskMonitor.shared
+        let usage = monitor.totalUsage
+
+        guard monitor.isAvailable else {
+            // Report the server's actual state: "not running" was previously shown
+            // even while it was up and the first poll had simply not landed.
+            let text: String
+            switch ServerManager.shared.status {
+            case .running: text = "Connecting to the harness API…"
+            case .starting: text = "Server starting…"
+            case .stopped, .error: text = "Server not running"
             }
+            let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            add(item)
+            return
+        }
+
+        // Aggregate line: tokens this run. Cost and remaining credits are not
+        // available from the harness (see README), so nothing is shown for them.
+        let totals = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        totals.attributedTitle = AppDelegate.columnedTitle(
+            "Session totals",
+            trailing: "↓ \(AppDelegate.abbreviateTokens(usage.input))  ↑ \(AppDelegate.abbreviateTokens(usage.output))"
+        )
+        totals.isEnabled = false
+        add(totals)
+
+        let tasks = monitor.orderedTasks()
+        guard !tasks.isEmpty else {
+            let idle = NSMenuItem(title: "No tasks yet this run", action: nil, keyEquivalent: "")
+            idle.isEnabled = false
+            add(idle)
+            return
+        }
+
+        for task in tasks {
+            let reason = task.outcome.reason.map { " (\($0))" } ?? ""
+            let leading = "\(task.outcome.marker) \(task.shortName)\(reason)"
+            let trailing = "↓ \(AppDelegate.abbreviateTokens(task.usage.input))  ↑ \(AppDelegate.abbreviateTokens(task.usage.output))"
+
+            let item = NSMenuItem(title: "", action: #selector(openBrowserFromMenu), keyEquivalent: "")
+            item.attributedTitle = AppDelegate.columnedTitle(leading, trailing: trailing)
+            item.target = self
+            item.toolTip = task.cwd
+            add(item)
         }
     }
     
@@ -1147,9 +1939,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc private func toggleServerFromMenu() {
-        if case .running = ServerManager.shared.status {
+        switch ServerManager.shared.status {
+        case .running, .starting:
             ServerManager.shared.stopWebServer()
-        } else {
+        case .stopped, .error:
             ServerManager.shared.startWebServer()
         }
     }

@@ -6,9 +6,66 @@
 
 set -euo pipefail
 
-# Determine script location and repo root
+# Determine script location
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
+# A DeepSeek-Harness checkout has both a package.json and apps/cli.
+is_harness_root() {
+    [ -n "${1:-}" ] && [ -f "${1}/package.json" ] && [ -d "${1}/apps/cli" ]
+}
+
+# Locate the harness checkout. This script may live inside the harness repo, next
+# to it, or anywhere else (it ships in the launcher repo), so search rather than
+# assuming a fixed relative depth.
+find_harness_root() {
+    local candidate
+
+    # 1. Explicit override.
+    if is_harness_root "${DSH_REPO_ROOT:-}"; then
+        printf '%s' "${DSH_REPO_ROOT}"
+        return 0
+    fi
+
+    # 2. Whatever folder the .app was pointed at, so both launchers agree.
+    if command -v defaults &>/dev/null; then
+        candidate="$(defaults read com.deepseek.harness.launcher DSH_REPO_ROOT 2>/dev/null || true)"
+        if is_harness_root "${candidate}"; then
+            printf '%s' "${candidate}"
+            return 0
+        fi
+    fi
+
+    # 3. This script's own directory, then each ancestor.
+    candidate="${SCRIPT_DIR}"
+    while [ "${candidate}" != "/" ]; do
+        if is_harness_root "${candidate}"; then
+            printf '%s' "${candidate}"
+            return 0
+        fi
+        candidate="$(dirname "${candidate}")"
+    done
+
+    # 4. Conventional checkout locations (mirrors src/main.swift).
+    for candidate in "${HOME}/git/deepseek-harness" "${HOME}/Projects/deepseek-harness" \
+                     "${HOME}/Developer/deepseek-harness" "${HOME}/code/deepseek-harness" \
+                     "${HOME}/deepseek-harness"; do
+        if is_harness_root "${candidate}"; then
+            printf '%s' "${candidate}"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+if ! REPO_ROOT="$(find_harness_root)"; then
+    echo "Error: could not locate a DeepSeek-Harness checkout." >&2
+    echo "Clone it, or point this script at it:" >&2
+    echo "  DSH_REPO_ROOT=/path/to/deepseek-harness \"${BASH_SOURCE[0]}\"" >&2
+    echo "" >&2
+    read -rp "Press Enter to exit..."
+    exit 1
+fi
 
 # Ensure common macOS binary locations are in PATH
 export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:${HOME}/.local/bin:${HOME}/.cargo/bin:${HOME}/.proto/shims:${HOME}/.proto/bin:${HOME}/.asdf/shims:${HOME}/.asdf/bin:${HOME}/.fnm/current/bin:${HOME}/.volta/bin:${PATH}"
@@ -68,35 +125,9 @@ fi
 NODE_VERSION="$(node -v)"
 echo -e "Node: ${GREEN}${NODE_VERSION}${NC}  |  pnpm: ${GREEN}$(pnpm -v)${NC}"
 
-# 2. Check API Key
-if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
-    if [ -f "${REPO_ROOT}/.env" ]; then
-        # Load .env
-        set -a
-        # shellcheck disable=SC1091
-        source "${REPO_ROOT}/.env"
-        set +a
-    elif [ -f "${HOME}/.dsh/.env" ]; then
-        set -a
-        # shellcheck disable=SC1091
-        source "${HOME}/.dsh/.env"
-        set +a
-    fi
-fi
-
-if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
-    echo -e "${YELLOW}Warning: DEEPSEEK_API_KEY is not set.${NC}"
-    read -rsp "Enter your DEEPSEEK_API_KEY (input hidden): " ENTERED_KEY
-    echo ""
-    if [ -n "${ENTERED_KEY}" ]; then
-        export DEEPSEEK_API_KEY="${ENTERED_KEY}"
-        mkdir -p "${HOME}/.dsh"
-        echo "DEEPSEEK_API_KEY=${ENTERED_KEY}" >> "${HOME}/.dsh/.env"
-        echo -e "${GREEN}Saved API key to ~/.dsh/.env${NC}"
-    else
-        echo -e "${RED}No API key provided. Some modes may fail.${NC}"
-    fi
-fi
+# 2. Credentials are the harness's business, not this script's. DeepSeek Harness
+#    resolves its own API key (its Providers page writes $DSH_HOME/.credentials.yaml,
+#    and an ambient $DEEPSEEK_API_KEY is honoured). Nothing is read or stored here.
 
 # 3. Check build artifacts
 if [ ! -f "${REPO_ROOT}/apps/web/dist/index.html" ] || [ ! -d "${REPO_ROOT}/packages/core/session/lib" ]; then

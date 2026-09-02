@@ -55,11 +55,11 @@ To remove the application and stop background processes:
 
 - **Menu Bar & Status Item**: Instant access from the macOS menu bar (`🐋 DSH` when running, `🐡 DSH` when starting, `🦑 DSH` when stopped).
 - **Central Control Window**: High-resolution GUI panel displaying active workspace, server state, quick action buttons, and configuration options.
-- **Interactive Terminal Session**: Opens a native terminal window pre-configured with workspace paths, `$PATH` discovery, and active API credentials.
+- **Interactive Terminal Session**: Opens a native terminal window pre-configured with workspace paths and `$PATH` discovery.
 - **Headless Task Launcher**: Run ad-hoc AI tasks on demand (`dsh --profile headless "<task>"`) with a native prompt dialog.
 - **Live Log Viewer**: Dedicated console window displaying real-time streaming server logs and historical output, with copy, clear, and direct log file opening.
-- **Smart Environment Discovery**: Automatically locates `node` (>= 22.19.0) and `pnpm` across Homebrew (`/opt/homebrew`, `/usr/local`), `nvm`, `asdf`, `proto`, `fnm`, and `volta`.
-- **Secure Key Management**: Prompt and store `DEEPSEEK_API_KEY` securely in `~/.dsh/.env` or repository `.env`.
+- **Smart Environment Discovery**: Automatically locates `node` (>= 22.19.0) and `pnpm` across Homebrew (`/opt/homebrew`, `/usr/local`), `nvm`, `asdf`, `proto`, `fnm`, and `volta`, preserving your login shell's own `$PATH` precedence.
+- **Handles No Secrets**: The launcher never reads, stores, or forwards your API key. DeepSeek Harness owns its own write-only credential store (`$DSH_HOME/.credentials.yaml`, managed from the **Providers** page in the web UI) and also honours an ambient `DEEPSEEK_API_KEY`.
 - **Server Startup & Clean Teardown**: DeepSeek-Harness runs as a managed child process; killing DSHL also tears down the child server process cleanly, mitigating the need for console commands entirely. No terminal process is started (hidden, with output streamable via *View Live Logs*). Session states are preserved.
 - **Zero Telemetry & Private**: No analytics, telemetry, or third-party network calls. I wrote this for my own usage for quick launching via Raycast, Spotlight, or menu bar.
 
@@ -105,7 +105,7 @@ make clean       # Remove build outputs and cached artifacts
 ## System Requirements
 
 - **Operating System**: macOS 13.0 (Ventura) or newer (Sonoma, Sequoia).
-- **Architectures**: Apple Silicon (`arm64`) and Intel (`x86_64`).
+- **Architectures**: Apple Silicon (`arm64`) and Intel (`x86_64`) — `scripts/build.sh` produces a universal binary.
 - **Launcher Dependencies**:
   - **Prebuilt Binary**: None (pure native Swift/AppKit, zero runtime dependencies).
   - **Building from Source**: Xcode Command Line Tools (`swiftc` via `xcode-select --install`) and `make`.

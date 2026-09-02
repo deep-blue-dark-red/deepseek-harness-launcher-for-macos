@@ -36,12 +36,39 @@ rm -rf "${APP_BUNDLE}"
 mkdir -p "${APP_BUNDLE}/Contents/MacOS"
 mkdir -p "${APP_BUNDLE}/Contents/Resources"
 
-echo "Compiling native Swift binary..."
-swiftc -O \
-    -o "${APP_BUNDLE}/Contents/MacOS/DeepSeekHarnessLauncher" \
-    "${SRC_PATH}"
+BINARY_PATH="${APP_BUNDLE}/Contents/MacOS/DeepSeekHarnessLauncher"
+DEPLOYMENT_TARGET="13.0"
+TMP_BUILD="$(mktemp -d "${TMPDIR:-/tmp}/dsh-build.XXXXXX")"
+trap 'rm -rf "${TMP_BUILD}"' EXIT
 
-chmod +x "${APP_BUNDLE}/Contents/MacOS/DeepSeekHarnessLauncher"
+# Build one slice per architecture and lipo them together, so a single bundle
+# runs natively on both Apple Silicon and Intel.
+echo "Compiling native Swift binary (arm64 + x86_64)..."
+SLICES=()
+for ARCH in arm64 x86_64; do
+    SLICE="${TMP_BUILD}/${ARCH}"
+    if swiftc -O -target "${ARCH}-apple-macos${DEPLOYMENT_TARGET}" \
+        -o "${SLICE}" "${SRC_PATH}" 2>"${TMP_BUILD}/${ARCH}.log"; then
+        SLICES+=("${SLICE}")
+        echo "  ✓ ${ARCH}"
+    else
+        echo "  ! ${ARCH} slice failed to build; continuing without it:"
+        sed 's/^/    /' "${TMP_BUILD}/${ARCH}.log" | head -n 10
+    fi
+done
+
+if [ "${#SLICES[@]}" -eq 0 ]; then
+    echo -e "${RED}Error: no architecture slice could be built.${NC}"
+    exit 1
+elif [ "${#SLICES[@]}" -eq 1 ]; then
+    echo -e "${RED}Warning: only one architecture built; this bundle is not universal.${NC}"
+    cp "${SLICES[0]}" "${BINARY_PATH}"
+else
+    lipo -create -output "${BINARY_PATH}" "${SLICES[@]}"
+fi
+
+chmod +x "${BINARY_PATH}"
+echo "Architectures: $(lipo -archs "${BINARY_PATH}")"
 
 echo "Copying metadata and assets..."
 cp "${PLIST_PATH}" "${APP_BUNDLE}/Contents/Info.plist"
