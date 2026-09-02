@@ -751,20 +751,27 @@ class MainWindowController: NSWindowController {
         container.addSubview(logsButton)
         
         // Author Credit Link (above separator)
-        let creditField = NSTextField(frame: NSRect(x: 30, y: 92, width: 500, height: 20))
+        let creditField = NSTextField(frame: NSRect(x: 20, y: 88, width: 520, height: 22))
         creditField.isEditable = false
         creditField.isSelectable = true
         creditField.isBordered = false
         creditField.drawsBackground = false
         creditField.alignment = .center
         
-        let creditText = "Made by deep-blue-dark-red"
+        let creditText = "made by deep-blue-dark-red, https://github.com/deep-blue-dark-red/deepseek-harness-launcher-for-macos"
         let attrString = NSMutableAttributedString(string: creditText)
-        let linkRange = (creditText as NSString).range(of: "deep-blue-dark-red")
-        attrString.addAttribute(.font, value: NSFont.systemFont(ofSize: 12, weight: .medium), range: NSRange(location: 0, length: attrString.length))
+        let linkRange = (creditText as NSString).range(of: "https://github.com/deep-blue-dark-red/deepseek-harness-launcher-for-macos")
+        attrString.addAttribute(.font, value: NSFont.systemFont(ofSize: 10.5, weight: .regular), range: NSRange(location: 0, length: attrString.length))
         attrString.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: NSRange(location: 0, length: attrString.length))
-        attrString.addAttribute(.link, value: Constants.authorUrl, range: linkRange)
+        if linkRange.location != NSNotFound {
+            attrString.addAttribute(.link, value: Constants.authorUrl, range: linkRange)
+        } else {
+            attrString.addAttribute(.link, value: Constants.authorUrl, range: NSRange(location: 0, length: attrString.length))
+        }
         creditField.attributedStringValue = attrString
+        
+        let clickRecognizer = NSClickGestureRecognizer(target: self, action: #selector(openAuthorUrlClicked))
+        creditField.addGestureRecognizer(clickRecognizer)
         container.addSubview(creditField)
         
         // Bottom Utility Bar
@@ -880,6 +887,12 @@ class MainWindowController: NSWindowController {
     
     @objc private func openDocsClicked() {
         if let url = URL(string: Constants.githubUrl) {
+            NSWorkspace.shared.open(url)
+        }
+    }
+    
+    @objc private func openAuthorUrlClicked() {
+        if let url = URL(string: Constants.authorUrl) {
             NSWorkspace.shared.open(url)
         }
     }
