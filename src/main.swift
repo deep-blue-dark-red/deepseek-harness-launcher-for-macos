@@ -661,10 +661,12 @@ class MainWindowController: NSWindowController {
         titleLabel.frame = NSRect(x: 30, y: 374, width: 410, height: 28)
         container.addSubview(titleLabel)
         
-        let subtitleLabel = NSTextField(labelWithString: "All-Plugin Cordis Agent Harness for macOS")
-        subtitleLabel.font = NSFont.systemFont(ofSize: 12, weight: .regular)
+        let subtitleLabel = NSTextField(labelWithString: "A minimal status-bar application for launching, restarting and controlling DeepSeek-Harness, written in Swift")
+        subtitleLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
         subtitleLabel.textColor = .secondaryLabelColor
-        subtitleLabel.frame = NSRect(x: 30, y: 352, width: 410, height: 18)
+        subtitleLabel.lineBreakMode = .byWordWrapping
+        subtitleLabel.maximumNumberOfLines = 2
+        subtitleLabel.frame = NSRect(x: 30, y: 340, width: 410, height: 32)
         container.addSubview(subtitleLabel)
         
         // Header Icon Picture (~160 retina pixels = 80x80 pt, right-aligned to border)
