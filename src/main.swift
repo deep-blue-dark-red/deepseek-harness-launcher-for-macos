@@ -751,18 +751,25 @@ class MainWindowController: NSWindowController {
         container.addSubview(logsButton)
         
         // Author Credit Link (above separator)
-        let creditField = NSTextField(frame: NSRect(x: 20, y: 88, width: 520, height: 22))
+        let creditField = NSTextField(frame: NSRect(x: 20, y: 80, width: 520, height: 38))
         creditField.isEditable = false
         creditField.isSelectable = true
         creditField.isBordered = false
         creditField.drawsBackground = false
+        creditField.lineBreakMode = .byWordWrapping
+        creditField.maximumNumberOfLines = 2
         creditField.alignment = .center
         
-        let creditText = "made by deep-blue-dark-red, https://github.com/deep-blue-dark-red/deepseek-harness-launcher-for-macos"
+        let creditText = "made by deep-blue-dark-red\nhttps://github.com/deep-blue-dark-red/deepseek-harness-launcher-for-macos"
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .center
+        paragraphStyle.lineSpacing = 3
+        
         let attrString = NSMutableAttributedString(string: creditText)
         let linkRange = (creditText as NSString).range(of: "https://github.com/deep-blue-dark-red/deepseek-harness-launcher-for-macos")
-        attrString.addAttribute(.font, value: NSFont.systemFont(ofSize: 10.5, weight: .regular), range: NSRange(location: 0, length: attrString.length))
+        attrString.addAttribute(.font, value: NSFont.systemFont(ofSize: 11, weight: .regular), range: NSRange(location: 0, length: attrString.length))
         attrString.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: NSRange(location: 0, length: attrString.length))
+        attrString.addAttribute(.paragraphStyle, value: paragraphStyle, range: NSRange(location: 0, length: attrString.length))
         if linkRange.location != NSNotFound {
             attrString.addAttribute(.link, value: Constants.authorUrl, range: linkRange)
         } else {
