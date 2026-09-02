@@ -657,6 +657,26 @@ class MainWindowController: NSWindowController {
     private var logsButton: NSButton!
     private var settingsButton: NSButton!
     private var repoPathLabel: NSTextField!
+    private var iconImageView: NSImageView!
+    private var whaleIconImage: NSImage!
+    
+    static func imageWithEmoji(_ emoji: String, size: NSSize = NSSize(width: 80, height: 80)) -> NSImage {
+        let image = NSImage(size: size)
+        image.lockFocus()
+        let str = NSString(string: emoji)
+        let font = NSFont.systemFont(ofSize: size.height * 0.72)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font]
+        let strSize = str.size(withAttributes: attrs)
+        let rect = NSRect(
+            x: (size.width - strSize.width) / 2,
+            y: (size.height - strSize.height) / 2,
+            width: strSize.width,
+            height: strSize.height
+        )
+        str.draw(in: rect, withAttributes: attrs)
+        image.unlockFocus()
+        return image
+    }
     
     convenience init() {
         let window = NSWindow(
@@ -704,22 +724,25 @@ class MainWindowController: NSWindowController {
         subtitleLabel.frame = NSRect(x: 30, y: 340, width: 410, height: 32)
         container.addSubview(subtitleLabel)
         
-        // Header Icon Picture (~160 retina pixels = 80x80 pt, right-aligned to border)
-        let iconImageView = NSImageView(frame: NSRect(x: 450, y: 342, width: 80, height: 80))
-        iconImageView.imageScaling = .scaleProportionallyUpOrDown
+        // Load whale icon
         if let appIcon = NSImage(named: "AppIcon") {
-            iconImageView.image = appIcon
+            whaleIconImage = appIcon
         } else if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
                   let iconImage = NSImage(contentsOf: iconURL) {
-            iconImageView.image = iconImage
+            whaleIconImage = iconImage
         } else if let pngURL = Bundle.main.url(forResource: "whale-harness", withExtension: "png"),
                   let pngImage = NSImage(contentsOf: pngURL) {
-            iconImageView.image = pngImage
+            whaleIconImage = pngImage
         } else if let localIcon = NSImage(contentsOfFile: "\(EnvironmentManager.shared.repoRoot)/resources/AppIcon.icns") {
-            iconImageView.image = localIcon
+            whaleIconImage = localIcon
         } else {
-            iconImageView.image = NSApp.applicationIconImage
+            whaleIconImage = NSApp.applicationIconImage
         }
+        
+        // Header Icon Picture (~160 retina pixels = 80x80 pt, right-aligned to border)
+        iconImageView = NSImageView(frame: NSRect(x: 450, y: 342, width: 80, height: 80))
+        iconImageView.imageScaling = .scaleProportionallyUpOrDown
+        iconImageView.image = MainWindowController.imageWithEmoji("🐙")
         container.addSubview(iconImageView)
         
         // Status Card Box
@@ -849,6 +872,7 @@ class MainWindowController: NSWindowController {
             webButton.title = "Start Web GUI"
             webButton.isEnabled = true
             openBrowserButton.isHidden = true
+            iconImageView?.image = MainWindowController.imageWithEmoji("🐙")
         case .starting:
             statusDot.fillColor = NSColor.systemYellow
             statusLabel.stringValue = "Web Server: Starting..."
@@ -856,13 +880,15 @@ class MainWindowController: NSWindowController {
             webButton.title = "Starting..."
             webButton.isEnabled = false
             openBrowserButton.isHidden = true
+            iconImageView?.image = MainWindowController.imageWithEmoji("🐙")
         case .running(_):
-            statusDot.fillColor = NSColor.systemGreen
+            statusDot.fillColor = NSColor.systemBlue
             statusLabel.stringValue = "Web Server: Running"
-            statusLabel.textColor = .systemGreen
+            statusLabel.textColor = .systemBlue
             webButton.title = "Stop Web Server"
             webButton.isEnabled = true
             openBrowserButton.isHidden = false
+            iconImageView?.image = whaleIconImage
         case .error(let message):
             statusDot.fillColor = NSColor.systemRed
             statusLabel.stringValue = "Error: \(message)"
@@ -870,6 +896,7 @@ class MainWindowController: NSWindowController {
             webButton.title = "Retry Web GUI"
             webButton.isEnabled = true
             openBrowserButton.isHidden = true
+            iconImageView?.image = MainWindowController.imageWithEmoji("🐙")
         }
     }
     
@@ -1024,7 +1051,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         
         if let button = statusItem.button {
-            button.title = "🐋 DSH"
+            button.title = "🐙 DSH"
         }
         
         statusMenu = NSMenu()
@@ -1067,13 +1094,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self = self else { return }
                 switch status {
                 case .running(_):
-                    self.statusItem.button?.title = "🐋🟢 DSH"
+                    self.statusItem.button?.title = "🐋🔵 DSH"
                     startWebItem.title = "Stop Web Server"
                 case .starting:
-                    self.statusItem.button?.title = "🐋🟡 DSH"
+                    self.statusItem.button?.title = "🐙🟡 DSH"
                     startWebItem.title = "Starting..."
                 case .stopped, .error:
-                    self.statusItem.button?.title = "🐋 DSH"
+                    self.statusItem.button?.title = "🐙 DSH"
                     startWebItem.title = "Start Web Server"
                 }
             }
