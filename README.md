@@ -53,7 +53,7 @@ To remove the application and stop background processes:
 
 ## Features
 
-- 🐋 **Menu Bar & Status Item**: Instant access from the macOS menu bar (🐋 DSH when running, 🐙 DSH when stopped) with live status indicators (🔵 Running, 🟡 Starting, ⚪ Stopped).
+- 🐋 **Menu Bar & Status Item**: Instant access from the macOS menu bar (`🐋 DSH` when running, `🐡 DSH` when starting, `🦑 DSH` when stopped) with real-time status indicators (`🐳 Running` in blue, `🐡 Starting` in yellow, `🦑 Stopped`).
 - **Central Control Window**: High-resolution GUI panel displaying active workspace, server state, quick action buttons, and configuration options.
 - **Interactive Terminal Session**: Opens a native terminal window pre-configured with workspace paths, `$PATH` discovery, and active API credentials.
 - **Headless Task Launcher**: Run ad-hoc AI tasks on demand (`dsh --profile headless "<task>"`) with a native prompt dialog.

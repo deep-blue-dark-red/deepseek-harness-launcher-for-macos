@@ -649,7 +649,7 @@ class MainWindowController: NSWindowController {
     static let shared = MainWindowController()
     
     private var statusLabel: NSTextField!
-    private var statusDot: NSBox!
+    private var statusEmojiLabel: NSTextField!
     private var webButton: NSButton!
     private var openBrowserButton: NSButton!
     private var terminalButton: NSButton!
@@ -742,7 +742,7 @@ class MainWindowController: NSWindowController {
         // Header Icon Picture (~160 retina pixels = 80x80 pt, right-aligned to border)
         iconImageView = NSImageView(frame: NSRect(x: 450, y: 342, width: 80, height: 80))
         iconImageView.imageScaling = .scaleProportionallyUpOrDown
-        iconImageView.image = MainWindowController.imageWithEmoji("🐙")
+        iconImageView.image = whaleIconImage
         container.addSubview(iconImageView)
         
         // Status Card Box
@@ -755,16 +755,18 @@ class MainWindowController: NSWindowController {
         statusCard.fillColor = NSColor.controlBackgroundColor
         container.addSubview(statusCard)
         
-        statusDot = NSBox(frame: NSRect(x: 20, y: 38, width: 12, height: 12))
-        statusDot.boxType = .custom
-        statusDot.cornerRadius = 6
-        statusDot.borderWidth = 0
-        statusDot.fillColor = NSColor.systemGray
-        statusCard.contentView?.addSubview(statusDot)
+        statusEmojiLabel = NSTextField(labelWithString: "🦑")
+        statusEmojiLabel.font = NSFont.systemFont(ofSize: 15)
+        statusEmojiLabel.isBezeled = false
+        statusEmojiLabel.drawsBackground = false
+        statusEmojiLabel.isEditable = false
+        statusEmojiLabel.isSelectable = false
+        statusEmojiLabel.frame = NSRect(x: 18, y: 35, width: 22, height: 20)
+        statusCard.contentView?.addSubview(statusEmojiLabel)
         
         statusLabel = NSTextField(labelWithString: "Web Server: Stopped")
         statusLabel.font = NSFont.systemFont(ofSize: 14, weight: .semibold)
-        statusLabel.frame = NSRect(x: 42, y: 35, width: 310, height: 20)
+        statusLabel.frame = NSRect(x: 44, y: 35, width: 308, height: 20)
         statusCard.contentView?.addSubview(statusLabel)
         
         repoPathLabel = NSTextField(labelWithString: "DSH Folder: \(EnvironmentManager.shared.repoRoot)")
@@ -866,37 +868,33 @@ class MainWindowController: NSWindowController {
     private func updateServerUI(_ status: ServerStatus) {
         switch status {
         case .stopped:
-            statusDot.fillColor = NSColor.systemGray
+            statusEmojiLabel.stringValue = "🦑"
             statusLabel.stringValue = "Web Server: Stopped"
             statusLabel.textColor = .labelColor
             webButton.title = "Start Web GUI"
             webButton.isEnabled = true
             openBrowserButton.isHidden = true
-            iconImageView?.image = MainWindowController.imageWithEmoji("🐙")
         case .starting:
-            statusDot.fillColor = NSColor.systemYellow
+            statusEmojiLabel.stringValue = "🐡"
             statusLabel.stringValue = "Web Server: Starting..."
             statusLabel.textColor = .systemYellow
             webButton.title = "Starting..."
             webButton.isEnabled = false
             openBrowserButton.isHidden = true
-            iconImageView?.image = MainWindowController.imageWithEmoji("🐙")
         case .running(_):
-            statusDot.fillColor = NSColor.systemBlue
+            statusEmojiLabel.stringValue = "🐳"
             statusLabel.stringValue = "Web Server: Running"
             statusLabel.textColor = .systemBlue
             webButton.title = "Stop Web Server"
             webButton.isEnabled = true
             openBrowserButton.isHidden = false
-            iconImageView?.image = whaleIconImage
         case .error(let message):
-            statusDot.fillColor = NSColor.systemRed
+            statusEmojiLabel.stringValue = "🦑"
             statusLabel.stringValue = "Error: \(message)"
             statusLabel.textColor = .systemRed
             webButton.title = "Retry Web GUI"
             webButton.isEnabled = true
             openBrowserButton.isHidden = true
-            iconImageView?.image = MainWindowController.imageWithEmoji("🐙")
         }
     }
     
@@ -924,28 +922,22 @@ class MainWindowController: NSWindowController {
     }
     
     @objc private func runTaskClicked() {
-        let env = EnvironmentManager.shared
-        if env.getApiKey() == nil {
-            promptForApiKey()
-            return
-        }
-        
         let alert = NSAlert()
         alert.messageText = "Run Headless Task"
-        alert.informativeText = "Enter a task instruction for DeepSeek Harness:"
-        alert.alertStyle = .informational
+        alert.informativeText = "Enter task description to run headless with DeepSeek Harness:"
         alert.addButton(withTitle: "Run Task")
         alert.addButton(withTitle: "Cancel")
         
-        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 380, height: 60))
-        input.placeholderString = "e.g. explain the architecture of packages/core or run the tests"
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+        input.placeholderString = "e.g. Find all TODO comments in packages/core"
         alert.accessoryView = input
         
         let response = alert.runModal()
         if response == .alertFirstButtonReturn {
-            let taskText = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !taskText.isEmpty {
-                HeadlessRunner.runTaskInTerminal(task: taskText, repoRoot: env.repoRoot, pathEnv: env.pathEnvironment)
+            let task = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !task.isEmpty {
+                let env = EnvironmentManager.shared
+                HeadlessRunner.runTaskInTerminal(task: task, repoRoot: env.repoRoot, pathEnv: env.pathEnvironment)
             }
         }
     }
@@ -1051,7 +1043,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         
         if let button = statusItem.button {
-            button.title = "🐙 DSH"
+            button.title = "🦑 DSH"
         }
         
         statusMenu = NSMenu()
@@ -1094,13 +1086,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self = self else { return }
                 switch status {
                 case .running(_):
-                    self.statusItem.button?.title = "🐋🔵 DSH"
+                    self.statusItem.button?.title = "🐋 DSH"
                     startWebItem.title = "Stop Web Server"
                 case .starting:
-                    self.statusItem.button?.title = "🐙🟡 DSH"
+                    self.statusItem.button?.title = "🐡 DSH"
                     startWebItem.title = "Starting..."
                 case .stopped, .error:
-                    self.statusItem.button?.title = "🐙 DSH"
+                    self.statusItem.button?.title = "🦑 DSH"
                     startWebItem.title = "Start Web Server"
                 }
             }
