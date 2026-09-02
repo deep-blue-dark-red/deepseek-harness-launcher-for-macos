@@ -4,9 +4,9 @@ import Foundation
 // MARK: - Constants & Configuration
 
 struct Constants {
-    static let appName = "DeepSeek Harness"
+    static let appName = "DeepSeek Harness Launcher"
     static let windowTitle = "Deepseek Harness Launcher for macOS"
-    static let bundleIdentifier = "com.deepseek.harness"
+    static let bundleIdentifier = "com.deepseek.harness.launcher"
     static let defaultPort = "5173"
     static let defaultProfile = "web"
     static let githubUrl = "https://github.com/deepseek-ai/deepseek-harness"
@@ -963,7 +963,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         statusMenu = NSMenu()
         
-        let titleItem = NSMenuItem(title: "DeepSeek Harness", action: nil, keyEquivalent: "")
+        let titleItem = NSMenuItem(title: "DeepSeek Harness Launcher", action: nil, keyEquivalent: "")
         titleItem.isEnabled = false
         statusMenu.addItem(titleItem)
         statusMenu.addItem(NSMenuItem.separator())
@@ -990,7 +990,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         statusMenu.addItem(NSMenuItem.separator())
         
-        let quitItem = NSMenuItem(title: "Quit DeepSeek Harness", action: #selector(quitApp), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "Quit DeepSeek Harness Launcher", action: #selector(quitApp), keyEquivalent: "q")
         quitItem.target = self
         statusMenu.addItem(quitItem)
         

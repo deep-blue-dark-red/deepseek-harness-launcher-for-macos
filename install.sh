@@ -7,9 +7,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DIST_DIR="${SCRIPT_DIR}/dist"
-APP_BUNDLE="${DIST_DIR}/DeepSeek Harness.app"
+APP_BUNDLE="${DIST_DIR}/DeepSeek Harness Launcher.app"
 TARGET_DIR="${HOME}/Applications"
-TARGET_APP="${TARGET_DIR}/DeepSeek Harness.app"
+TARGET_APP="${TARGET_DIR}/DeepSeek Harness Launcher.app"
 
 BOLD='\033[1m'
 CYAN='\033[0;36m'
@@ -34,13 +34,13 @@ echo "Building application..."
 # 3. Install to ~/Applications
 echo "Installing to ${TARGET_DIR}..."
 mkdir -p "${TARGET_DIR}"
-rm -rf "${TARGET_APP}"
+rm -rf "${TARGET_APP}" "${TARGET_DIR}/DeepSeek Harness.app"
 cp -R "${APP_BUNDLE}" "${TARGET_APP}"
 
 echo -e "${GREEN}${BOLD}✓ DeepSeek Harness Launcher successfully installed to:${NC}"
 echo "  ${TARGET_APP}"
 echo ""
 echo "Launch options:"
-echo "  • Spotlight: Press Cmd + Space, type 'DeepSeek Harness', and press Enter"
-echo "  • Launchpad / Finder: Open ~/Applications/DeepSeek Harness.app"
-echo "  • Terminal: open -a \"DeepSeek Harness\""
+echo "  • Spotlight: Press Cmd + Space, type 'DeepSeek Harness Launcher', and press Enter"
+echo "  • Launchpad / Finder: Open ~/Applications/DeepSeek Harness Launcher.app"
+echo "  • Terminal: open -a \"DeepSeek Harness Launcher\""

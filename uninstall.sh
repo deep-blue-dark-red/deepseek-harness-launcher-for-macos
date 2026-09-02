@@ -6,7 +6,8 @@
 set -euo pipefail
 
 TARGET_DIR="${HOME}/Applications"
-TARGET_APP="${TARGET_DIR}/DeepSeek Harness.app"
+TARGET_APP="${TARGET_DIR}/DeepSeek Harness Launcher.app"
+LEGACY_APP="${TARGET_DIR}/DeepSeek Harness.app"
 
 BOLD='\033[1m'
 CYAN='\033[0;36m'
@@ -18,7 +19,7 @@ echo -e "${CYAN}${BOLD}=== Uninstalling DeepSeek Harness Launcher ===${NC}"
 
 # 1. Terminate running instance if active
 if pgrep -f "DeepSeekHarnessLauncher" &>/dev/null; then
-    echo "Stopping running DeepSeek Harness instance..."
+    echo "Stopping running DeepSeek Harness Launcher instance..."
     pkill -f "DeepSeekHarnessLauncher" 2>/dev/null || true
     sleep 1
 fi
@@ -28,8 +29,17 @@ if [ -d "${TARGET_APP}" ]; then
     echo "Removing ${TARGET_APP}..."
     rm -rf "${TARGET_APP}"
     echo -e "${GREEN}${BOLD}✓ Removed ${TARGET_APP}${NC}"
+elif [ -d "${LEGACY_APP}" ]; then
+    echo "Removing ${LEGACY_APP}..."
+    rm -rf "${LEGACY_APP}"
+    echo -e "${GREEN}${BOLD}✓ Removed ${LEGACY_APP}${NC}"
 else
     echo -e "${YELLOW}Notice: ${TARGET_APP} was not found.${NC}"
+fi
+
+# Clean legacy path if present
+if [ -d "${LEGACY_APP}" ]; then
+    rm -rf "${LEGACY_APP}"
 fi
 
 echo -e "${GREEN}${BOLD}✓ DeepSeek Harness Launcher uninstalled successfully.${NC}"

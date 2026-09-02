@@ -5,17 +5,17 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleDisplayName</key>
-    <string>DeepSeek Harness</string>
+    <string>DeepSeek Harness Launcher</string>
     <key>CFBundleExecutable</key>
     <string>DeepSeekHarnessLauncher</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
-    <string>com.deepseek.harness</string>
+    <string>com.deepseek.harness.launcher</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>DeepSeek Harness</string>
+    <string>DeepSeek Harness Launcher</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -27,12 +27,12 @@
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSHumanReadableCopyright</key>
-    <string>Copyright © 2026 DeepSeek AI. MIT License.</string>
+    <string>Copyright © 2026 deep-blue-dark-red. MIT License.</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
     <key>NSAppleEventsUsageDescription</key>
-    <string>DeepSeek Harness requires permission to open Terminal windows for interactive sessions and tasks.</string>
+    <string>DeepSeek Harness Launcher requires permission to open Terminal windows for interactive sessions and tasks.</string>
 </dict>
 </plist>

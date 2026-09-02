@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Build DeepSeek Harness.app macOS Application Bundle
+# Build DeepSeek Harness Launcher.app macOS Application Bundle
 # ==============================================================================
 
 set -euo pipefail
@@ -8,7 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DIST_DIR="${REPO_ROOT}/dist"
-APP_BUNDLE="${DIST_DIR}/DeepSeek Harness.app"
+APP_BUNDLE="${DIST_DIR}/DeepSeek Harness Launcher.app"
 ICON_PATH="${REPO_ROOT}/resources/AppIcon.icns"
 SRC_PATH="${REPO_ROOT}/src/main.swift"
 PLIST_PATH="${REPO_ROOT}/Info.plist"
@@ -19,7 +19,7 @@ GREEN='\033[0;32m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${CYAN}${BOLD}=== Building DeepSeek Harness for macOS ===${NC}"
+echo -e "${CYAN}${BOLD}=== Building DeepSeek Harness Launcher for macOS ===${NC}"
 
 if ! command -v swiftc &>/dev/null; then
     echo -e "${RED}Error: swiftc compiler not found.${NC}"

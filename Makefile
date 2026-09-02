@@ -15,7 +15,7 @@ icon:
 	@bash scripts/generate-icon.sh
 
 run: build
-	@open "dist/DeepSeek Harness.app"
+	@open "dist/DeepSeek Harness Launcher.app"
 
 clean:
 	@rm -rf dist build /tmp/dsh_app_icon.iconset

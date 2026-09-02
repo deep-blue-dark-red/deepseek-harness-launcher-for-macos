@@ -29,10 +29,10 @@ cd deepseek-harness-launcher-for-macos
 ./install.sh
 ```
 
-Once installed, launch **DeepSeek Harness** via:
-- **Spotlight**: Press `Cmd + Space`, type `DeepSeek Harness`, and press `Enter`.
-- **Finder / Launchpad**: Open `~/Applications/DeepSeek Harness.app`.
-- **Terminal**: `open -a "DeepSeek Harness"`
+Once installed, launch **DeepSeek Harness Launcher** via:
+- **Spotlight / Raycast**: Press `Cmd + Space`, type `DeepSeek Harness Launcher`, and press `Enter`.
+- **Finder / Launchpad**: Open `~/Applications/DeepSeek Harness Launcher.app`.
+- **Terminal**: `open -a "DeepSeek Harness Launcher"`
 
 ## Uninstallation
 
@@ -46,7 +46,7 @@ To remove the application and stop background processes:
 
 ## Overview
 
-**DeepSeek Harness Launcher** (`DeepSeek Harness.app`) is a lightweight native macOS AppKit application designed to launch, control, and monitor DeepSeek Harness servers, web interfaces, interactive terminal sessions, and headless tasks directly from your macOS Menu Bar, Dock, Spotlight, or Launchpad.
+**DeepSeek Harness Launcher** (`DeepSeek Harness Launcher.app`) is a lightweight native macOS AppKit application designed to launch, control, and monitor DeepSeek Harness servers, web interfaces, interactive terminal sessions, and headless tasks directly from your macOS Menu Bar, Dock, Spotlight, Raycast, or Launchpad.
 
 ---
 
@@ -81,7 +81,7 @@ deepseek-harness-launcher-for-macos/
 ├── src/
 │   └── main.swift              # Native Swift AppKit Launcher implementation
 └── scripts/
-    ├── build.sh                # Compiles swift source and bundles DeepSeek Harness.app
+    ├── build.sh                # Compiles swift source and bundles DeepSeek Harness Launcher.app
     ├── generate-icon.sh        # Generates soft-corner squircle .icns from artwork
     └── install.sh              # Bundle installer helper
 ```
@@ -91,9 +91,9 @@ deepseek-harness-launcher-for-macos/
 ## Build Targets
 
 ```bash
-make install     # Build and install to ~/Applications/DeepSeek Harness.app
+make install     # Build and install to ~/Applications/DeepSeek Harness Launcher.app
 make uninstall   # Stop running instances and remove application
-make build       # Compile and bundle dist/DeepSeek Harness.app
+make build       # Compile and bundle dist/DeepSeek Harness Launcher.app
 make run         # Build and launch application immediately
 make icon        # Regenerate AppIcon.icns from resources/whale-harness.png
 make clean       # Remove build outputs and cached artifacts
