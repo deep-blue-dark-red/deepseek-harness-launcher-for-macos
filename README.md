@@ -11,6 +11,10 @@
 [![Architecture](https://img.shields.io/badge/Architecture-Apple%20Silicon%20%7C%20Intel-purple)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 
+<br />
+
+<img src="resources/desktop-macos.png" alt="DeepSeek Harness macOS Launcher Screenshot" width="850" />
+
 </div>
 
 ---
