@@ -5,6 +5,7 @@ import Foundation
 
 struct Constants {
     static let appName = "DeepSeek Harness"
+    static let windowTitle = "Deepseek Harness Launcher for macOS"
     static let bundleIdentifier = "com.deepseek.harness"
     static let defaultPort = "5173"
     static let defaultProfile = "web"
@@ -634,7 +635,7 @@ class MainWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = Constants.appName
+        window.title = Constants.windowTitle
         window.center()
         self.init(window: window)
         
