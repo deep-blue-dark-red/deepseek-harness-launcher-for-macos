@@ -235,10 +235,39 @@ class ServerManager: NSObject {
     var onStatusChange: ((ServerStatus) -> Void)?
     var onLogLine: ((String) -> Void)?
     
+    private(set) var logHistory: [String] = []
+    private let maxLogLines = 5000
+    
     private var process: Process?
     private var stdoutPipe: Pipe?
     private var logFileHandle: FileHandle?
     private(set) var currentWebUrl: String?
+    
+    func appendLogLine(_ line: String) {
+        logHistory.append(line)
+        if logHistory.count > maxLogLines {
+            logHistory.removeFirst(logHistory.count - maxLogLines)
+        }
+        self.onLogLine?(line)
+    }
+    
+    func getLogText() -> String {
+        if !logHistory.isEmpty {
+            return logHistory.joined(separator: "\n")
+        }
+        let logFilePath = Constants.logsDirectory.appendingPathComponent("dsh-web.log")
+        if let diskContent = try? String(contentsOfFile: logFilePath.path, encoding: .utf8), !diskContent.isEmpty {
+            return diskContent
+        }
+        let env = EnvironmentManager.shared
+        return """
+        === DeepSeek Harness — Live Logs Console ===
+        Workspace: \(env.repoRoot)
+        Server Status: Stopped
+        
+        Logs will stream here in real time when the Web server or tasks are started.
+        """
+    }
     
     func startWebServer(port: String = Constants.defaultPort) {
         guard case .stopped = status else { return }
@@ -284,18 +313,22 @@ class ServerManager: NSObject {
         self.stdoutPipe = pipe
         self.process = proc
         
+        appendLogLine(">>> Starting DeepSeek Harness Web GUI (pnpm \(procArgs.joined(separator: " ")))...")
+        
         let outHandle = pipe.fileHandleForReading
         outHandle.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty, let self = self else { return }
             
-            self.logFileHandle?.write(data)
+            try? self.logFileHandle?.write(contentsOf: data)
             
             if let text = String(data: data, encoding: .utf8) {
                 let lines = text.components(separatedBy: .newlines)
                 for line in lines where !line.isEmpty {
-                    self.onLogLine?(line)
-                    self.parseOutputLine(line)
+                    DispatchQueue.main.async {
+                        self.appendLogLine(line)
+                        self.parseOutputLine(line)
+                    }
                 }
             }
         }
@@ -304,9 +337,10 @@ class ServerManager: NSObject {
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.stdoutPipe?.fileHandleForReading.readabilityHandler = nil
-                self.logFileHandle?.closeFile()
+                try? self.logFileHandle?.close()
                 self.logFileHandle = nil
                 self.process = nil
+                self.appendLogLine(">>> DeepSeek Harness Web process exited with code \(p.terminationStatus)")
                 self.status = .stopped
             }
         }
@@ -314,7 +348,9 @@ class ServerManager: NSObject {
         do {
             try proc.run()
         } catch {
-            self.status = .error(message: "Failed to start process: \(error.localizedDescription)")
+            let errMsg = "Failed to start process: \(error.localizedDescription)"
+            appendLogLine(">>> Error: \(errMsg)")
+            self.status = .error(message: errMsg)
         }
     }
     
@@ -340,6 +376,7 @@ class ServerManager: NSObject {
             return
         }
         
+        appendLogLine(">>> Stopping DeepSeek Harness Web server...")
         proc.terminate()
         DispatchQueue.global().async {
             for _ in 0..<20 {
@@ -364,38 +401,85 @@ class ServerManager: NSObject {
     }
 }
 
-// MARK: - Headless Task Runner
+// MARK: - Headless & Terminal Task Runner
 
 class HeadlessRunner {
     static func runTaskInTerminal(task: String, repoRoot: String, pathEnv: String) {
-        let escapedTask = task.replacingOccurrences(of: "'", with: "'\\''")
-        let script = """
-        tell application "Terminal"
-            activate
-            do script "cd '\(repoRoot)' && export PATH='\(pathEnv)':$PATH && pnpm dsh --profile headless '\(escapedTask)'"
-        end tell
+        let env = EnvironmentManager.shared
+        let apiKey = env.getApiKey() ?? ""
+        let escapedTask = task.replacingOccurrences(of: "\"", with: "\\\"")
+        
+        let tempScript = FileManager.default.temporaryDirectory.appendingPathComponent("dsh-task-\(ProcessInfo.processInfo.globallyUniqueString.prefix(8)).command")
+        let scriptContent = """
+        #!/usr/bin/env bash
+        # DeepSeek Harness Headless Task
+        cd "\(repoRoot)"
+        export PATH="\(pathEnv):$PATH"
+        export DEEPSEEK_API_KEY="\(apiKey)"
+        clear
+        echo -e "\\033[1;36m===================================================\\033[0m"
+        echo -e "\\033[1;36m  🤖 DeepSeek Harness — Headless Task Runner\\033[0m"
+        echo -e "\\033[1;36m===================================================\\033[0m"
+        echo "Task: \(task)"
+        echo "Workspace: \(repoRoot)"
+        echo "---------------------------------------------------"
+        echo ""
+        pnpm dsh --profile headless "\(escapedTask)"
+        echo ""
+        echo "---------------------------------------------------"
+        read -rp "Task finished. Press Enter to close..."
         """
-        if let appleScript = NSAppleScript(source: script) {
-            var error: NSDictionary?
-            appleScript.executeAndReturnError(&error)
-            if let error = error {
-                print("AppleScript error: \(error)")
-            }
+        do {
+            try scriptContent.write(to: tempScript, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tempScript.path)
+            launchScriptInTerminal(scriptURL: tempScript)
+        } catch {
+            print("Error creating task command: \(error)")
         }
     }
     
     static func openInteractiveTerminal(repoRoot: String, pathEnv: String) {
-        let script = """
-        tell application "Terminal"
-            activate
-            do script "cd '\(repoRoot)' && export PATH='\(pathEnv)':$PATH && echo '🤖 DeepSeek Harness Environment Ready' && echo 'Commands: pnpm dsh web | pnpm dsh --profile headless \"<task>\" | pnpm dsh --help' && echo ''"
-        end tell
+        let env = EnvironmentManager.shared
+        let apiKey = env.getApiKey() ?? ""
+        
+        let tempScript = FileManager.default.temporaryDirectory.appendingPathComponent("dsh-session-\(ProcessInfo.processInfo.globallyUniqueString.prefix(8)).command")
+        let scriptContent = """
+        #!/usr/bin/env bash
+        # DeepSeek Harness Terminal Session
+        cd "\(repoRoot)"
+        export PATH="\(pathEnv):$PATH"
+        export DEEPSEEK_API_KEY="\(apiKey)"
+        clear
+        echo -e "\\033[1;36m===================================================\\033[0m"
+        echo -e "\\033[1;36m  🐋 DeepSeek Harness — Interactive Terminal Session\\033[0m"
+        echo -e "\\033[1;36m===================================================\\033[0m"
+        echo "Workspace: \(repoRoot)"
+        echo ""
+        echo "Commands:"
+        echo "  • pnpm dsh web                          # Start Web GUI"
+        echo "  • pnpm dsh --profile headless \\"<task>\\"  # Run headless task"
+        echo "  • pnpm dsh --help                       # All CLI options"
+        echo ""
+        exec "${SHELL:-/bin/zsh}" -l
         """
-        if let appleScript = NSAppleScript(source: script) {
-            var error: NSDictionary?
-            appleScript.executeAndReturnError(&error)
-            if let error = error {
-                print("AppleScript error: \(error)")
+        do {
+            try scriptContent.write(to: tempScript, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tempScript.path)
+            launchScriptInTerminal(scriptURL: tempScript)
+        } catch {
+            print("Error creating terminal command: \(error)")
+        }
+    }
+    
+    private static func launchScriptInTerminal(scriptURL: URL) {
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = true
+        NSWorkspace.shared.open(scriptURL, configuration: config) { _, error in
+            if error != nil {
+                let proc = Process()
+                proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+                proc.arguments = ["-a", "Terminal", scriptURL.path]
+                try? proc.run()
             }
         }
     }
@@ -410,12 +494,13 @@ class LogWindowController: NSWindowController {
     
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 750, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 520),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "DeepSeek Harness - Live Logs"
+        window.minSize = NSSize(width: 500, height: 300)
         window.center()
         self.init(window: window)
         
@@ -423,9 +508,39 @@ class LogWindowController: NSWindowController {
     }
     
     private func setupUI() {
-        guard let window = window else { return }
+        guard let window = window, let contentView = window.contentView else { return }
         
-        let scrollView = NSScrollView(frame: window.contentView!.bounds)
+        // Bottom Utility Toolbar (height 40)
+        let toolbar = NSView(frame: NSRect(x: 0, y: 0, width: contentView.bounds.width, height: 40))
+        toolbar.autoresizingMask = [.width, .maxYMargin]
+        contentView.addSubview(toolbar)
+        
+        let clearBtn = NSButton(title: "Clear", target: self, action: #selector(clearLogsClicked))
+        clearBtn.bezelStyle = .rounded
+        clearBtn.frame = NSRect(x: 10, y: 5, width: 80, height: 30)
+        toolbar.addSubview(clearBtn)
+        
+        let copyBtn = NSButton(title: "Copy All", target: self, action: #selector(copyLogsClicked))
+        copyBtn.bezelStyle = .rounded
+        copyBtn.frame = NSRect(x: 95, y: 5, width: 90, height: 30)
+        toolbar.addSubview(copyBtn)
+        
+        let openFileBtn = NSButton(title: "Open Log File", target: self, action: #selector(openLogFileClicked))
+        openFileBtn.bezelStyle = .rounded
+        openFileBtn.frame = NSRect(x: 190, y: 5, width: 120, height: 30)
+        toolbar.addSubview(openFileBtn)
+        
+        let logPathLabel = NSTextField(labelWithString: "Log: ~/Library/Logs/DeepSeekHarness/dsh-web.log")
+        logPathLabel.font = NSFont.systemFont(ofSize: 11)
+        logPathLabel.textColor = .secondaryLabelColor
+        logPathLabel.alignment = .right
+        logPathLabel.frame = NSRect(x: 320, y: 10, width: contentView.bounds.width - 330, height: 20)
+        logPathLabel.autoresizingMask = [.width, .minXMargin]
+        toolbar.addSubview(logPathLabel)
+        
+        // ScrollView + TextView
+        let scrollFrame = NSRect(x: 0, y: 40, width: contentView.bounds.width, height: contentView.bounds.height - 40)
+        let scrollView = NSScrollView(frame: scrollFrame)
         scrollView.autoresizingMask = [.width, .height]
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
@@ -437,10 +552,12 @@ class LogWindowController: NSWindowController {
         textView.backgroundColor = NSColor(red: 0.1, green: 0.12, blue: 0.15, alpha: 1.0)
         textView.textColor = NSColor(red: 0.85, green: 0.9, blue: 0.95, alpha: 1.0)
         textView.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-        textView.textContainerInset = NSSize(width: 10, height: 10)
+        textView.textContainerInset = NSSize(width: 12, height: 12)
         
         scrollView.documentView = textView
-        window.contentView?.addSubview(scrollView)
+        contentView.addSubview(scrollView)
+        
+        reloadLogs()
         
         ServerManager.shared.onLogLine = { [weak self] line in
             DispatchQueue.main.async {
@@ -449,8 +566,21 @@ class LogWindowController: NSWindowController {
         }
     }
     
+    func reloadLogs() {
+        guard textView != nil else { return }
+        let fullText = ServerManager.shared.getLogText()
+        textView.string = fullText
+        textView.scrollToEndOfDocument(nil)
+    }
+    
+    override func showWindow(_ sender: Any?) {
+        super.showWindow(sender)
+        reloadLogs()
+    }
+    
     func appendLog(_ text: String) {
-        let formatted = text + "\n"
+        guard textView != nil else { return }
+        let formatted = (textView.string.isEmpty ? "" : "\n") + text
         let attr = NSAttributedString(
             string: formatted,
             attributes: [
@@ -462,8 +592,25 @@ class LogWindowController: NSWindowController {
         textView.scrollToEndOfDocument(nil)
     }
     
-    func clearLogs() {
+    @objc private func clearLogsClicked() {
         textView.string = ""
+    }
+    
+    @objc private func copyLogsClicked() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(textView.string, forType: .string)
+    }
+    
+    @objc private func openLogFileClicked() {
+        let logFilePath = Constants.logsDirectory.appendingPathComponent("dsh-web.log")
+        if FileManager.default.fileExists(atPath: logFilePath.path) {
+            NSWorkspace.shared.open(logFilePath)
+        } else {
+            let alert = NSAlert()
+            alert.messageText = "No Log File"
+            alert.informativeText = "The log file will be created when the server is started."
+            alert.runModal()
+        }
     }
 }
 
@@ -685,6 +832,7 @@ class MainWindowController: NSWindowController {
     @objc private func viewLogsClicked() {
         LogWindowController.shared.showWindow(nil)
         LogWindowController.shared.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
     
     @objc private func openSettingsClicked() {
