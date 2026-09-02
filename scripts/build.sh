@@ -47,6 +47,9 @@ echo "Copying metadata and assets..."
 cp "${PLIST_PATH}" "${APP_BUNDLE}/Contents/Info.plist"
 echo -n "APPL????" > "${APP_BUNDLE}/Contents/PkgInfo"
 cp "${ICON_PATH}" "${APP_BUNDLE}/Contents/Resources/AppIcon.icns"
+if [ -f "${REPO_ROOT}/resources/whale-harness.png" ]; then
+    cp "${REPO_ROOT}/resources/whale-harness.png" "${APP_BUNDLE}/Contents/Resources/whale-harness.png"
+fi
 touch "${APP_BUNDLE}"
 
 echo -e "${GREEN}${BOLD}✓ Application successfully built at: ${APP_BUNDLE}${NC}"

@@ -654,17 +654,35 @@ class MainWindowController: NSWindowController {
         container.autoresizingMask = [.width, .height]
         contentView.addSubview(container)
         
-        // Header Title
-        let titleLabel = NSTextField(labelWithString: "DeepSeek Harness")
-        titleLabel.font = NSFont.systemFont(ofSize: 22, weight: .bold)
-        titleLabel.frame = NSRect(x: 30, y: 370, width: 350, height: 30)
+        // Header Title & Subtitle
+        let titleLabel = NSTextField(labelWithString: "DeepSeek Harness Launcher")
+        titleLabel.font = NSFont.systemFont(ofSize: 21, weight: .bold)
+        titleLabel.frame = NSRect(x: 30, y: 374, width: 410, height: 28)
         container.addSubview(titleLabel)
         
         let subtitleLabel = NSTextField(labelWithString: "All-Plugin Cordis Agent Harness for macOS")
         subtitleLabel.font = NSFont.systemFont(ofSize: 12, weight: .regular)
         subtitleLabel.textColor = .secondaryLabelColor
-        subtitleLabel.frame = NSRect(x: 30, y: 348, width: 400, height: 18)
+        subtitleLabel.frame = NSRect(x: 30, y: 352, width: 410, height: 18)
         container.addSubview(subtitleLabel)
+        
+        // Header Icon Picture (~160 retina pixels = 80x80 pt, right-aligned to border)
+        let iconImageView = NSImageView(frame: NSRect(x: 450, y: 342, width: 80, height: 80))
+        iconImageView.imageScaling = .scaleProportionallyUpOrDown
+        if let appIcon = NSImage(named: "AppIcon") {
+            iconImageView.image = appIcon
+        } else if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+                  let iconImage = NSImage(contentsOf: iconURL) {
+            iconImageView.image = iconImage
+        } else if let pngURL = Bundle.main.url(forResource: "whale-harness", withExtension: "png"),
+                  let pngImage = NSImage(contentsOf: pngURL) {
+            iconImageView.image = pngImage
+        } else if let localIcon = NSImage(contentsOfFile: "\(EnvironmentManager.shared.repoRoot)/resources/AppIcon.icns") {
+            iconImageView.image = localIcon
+        } else {
+            iconImageView.image = NSApp.applicationIconImage
+        }
+        container.addSubview(iconImageView)
         
         // Status Card Box
         let statusCard = NSBox(frame: NSRect(x: 30, y: 260, width: 500, height: 75))
