@@ -255,15 +255,24 @@ enum ServerStatus {
 class ServerManager: NSObject {
     static let shared = ServerManager()
     
+    private var statusListeners: [(ServerStatus) -> Void] = []
+    
     private(set) var status: ServerStatus = .stopped {
         didSet {
-            DispatchQueue.main.async {
-                self.onStatusChange?(self.status)
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                for listener in self.statusListeners {
+                    listener(self.status)
+                }
             }
         }
     }
     
-    var onStatusChange: ((ServerStatus) -> Void)?
+    func addStatusListener(_ listener: @escaping (ServerStatus) -> Void) {
+        statusListeners.append(listener)
+        listener(status)
+    }
+    
     var onLogLine: ((String) -> Void)?
     
     private(set) var logHistory: [String] = []
@@ -690,9 +699,8 @@ class MainWindowController: NSWindowController {
         self.init(window: window)
         
         setupUI()
-        updateServerUI(ServerManager.shared.status)
         
-        ServerManager.shared.onStatusChange = { [weak self] status in
+        ServerManager.shared.addStatusListener { [weak self] status in
             self?.updateServerUI(status)
         }
     }
@@ -1081,7 +1089,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         statusItem.menu = statusMenu
         
-        ServerManager.shared.onStatusChange = { [weak self] status in
+        ServerManager.shared.addStatusListener { [weak self] status in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 switch status {
