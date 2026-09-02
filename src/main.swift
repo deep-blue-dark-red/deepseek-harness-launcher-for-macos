@@ -141,7 +141,30 @@ class EnvironmentManager {
             }
         }
         
+        // If not found in standard locations, prompt user for folder
+        if let userChosen = promptUserForRepoRoot() {
+            return userChosen
+        }
+        
         return cwd
+    }
+    
+    static func promptUserForRepoRoot() -> String? {
+        let panel = NSOpenPanel()
+        panel.title = "Locate DeepSeek-Harness Folder"
+        panel.message = "Could not automatically locate the DeepSeek-Harness repository folder. Please select your deepseek-harness folder:"
+        panel.prompt = "Select Folder"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = false
+        
+        if panel.runModal() == .OK, let url = panel.url {
+            let chosenPath = url.path
+            UserDefaults.standard.set(chosenPath, forKey: "DSH_REPO_ROOT")
+            return chosenPath
+        }
+        return nil
     }
     
     func setRepoRoot(_ newPath: String) {
@@ -270,7 +293,7 @@ class ServerManager: NSObject {
         let env = EnvironmentManager.shared
         return """
         === DeepSeek Harness — Live Logs Console ===
-        Workspace: \(env.repoRoot)
+        DSH Folder: \(env.repoRoot)
         Server Status: Stopped
         
         Logs will stream here in real time when the Web server or tasks are started.
@@ -429,7 +452,7 @@ class HeadlessRunner {
         echo -e "\\033[1;36m  🤖 DeepSeek Harness — Headless Task Runner\\033[0m"
         echo -e "\\033[1;36m===================================================\\033[0m"
         echo "Task: \(task)"
-        echo "Workspace: \(repoRoot)"
+        echo "DSH Folder: \(repoRoot)"
         echo "---------------------------------------------------"
         echo ""
         pnpm dsh --profile headless "\(escapedTask)"
@@ -461,7 +484,7 @@ class HeadlessRunner {
         echo -e "\\033[1;36m===================================================\\033[0m"
         echo -e "\\033[1;36m  🐋 DeepSeek Harness — Interactive Terminal Session\\033[0m"
         echo -e "\\033[1;36m===================================================\\033[0m"
-        echo "Workspace: \(repoRoot)"
+        echo "DSH Folder: \(repoRoot)"
         echo ""
         echo "Commands:"
         echo "  • pnpm dsh web                          # Start Web GUI"
@@ -721,12 +744,18 @@ class MainWindowController: NSWindowController {
         statusLabel.frame = NSRect(x: 42, y: 35, width: 310, height: 20)
         statusCard.contentView?.addSubview(statusLabel)
         
-        repoPathLabel = NSTextField(labelWithString: "Workspace: \(EnvironmentManager.shared.repoRoot)")
+        repoPathLabel = NSTextField(labelWithString: "DSH Folder: \(EnvironmentManager.shared.repoRoot)")
         repoPathLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
         repoPathLabel.textColor = .secondaryLabelColor
         repoPathLabel.lineBreakMode = .byTruncatingMiddle
-        repoPathLabel.frame = NSRect(x: 20, y: 12, width: 460, height: 16)
+        repoPathLabel.frame = NSRect(x: 20, y: 12, width: 380, height: 16)
         statusCard.contentView?.addSubview(repoPathLabel)
+        
+        let changeFolderButton = NSButton(title: "Change...", target: self, action: #selector(chooseFolderClicked))
+        changeFolderButton.bezelStyle = .inline
+        changeFolderButton.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+        changeFolderButton.frame = NSRect(x: 410, y: 10, width: 75, height: 20)
+        statusCard.contentView?.addSubview(changeFolderButton)
         
         openBrowserButton = NSButton(title: "Open Browser", target: self, action: #selector(openBrowserClicked))
         openBrowserButton.bezelStyle = .rounded
@@ -916,6 +945,31 @@ class MainWindowController: NSWindowController {
         }
     }
     
+    @objc private func chooseFolderClicked() {
+        let panel = NSOpenPanel()
+        panel.title = "Select DeepSeek-Harness Folder"
+        panel.message = "Choose the directory where your deepseek-harness repository is located:"
+        panel.prompt = "Select Folder"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = false
+        panel.directoryURL = URL(fileURLWithPath: EnvironmentManager.shared.repoRoot)
+        
+        if panel.runModal() == .OK, let url = panel.url {
+            let newPath = url.path
+            EnvironmentManager.shared.setRepoRoot(newPath)
+            repoPathLabel.stringValue = "DSH Folder: \(newPath)"
+            
+            if case .running = ServerManager.shared.status {
+                let alert = NSAlert()
+                alert.messageText = "DSH Folder Updated"
+                alert.informativeText = "DeepSeek-Harness folder has been changed to:\n\(newPath)\n\nPlease restart the web server to apply the change."
+                alert.runModal()
+            }
+        }
+    }
+    
     private func promptForApiKey() {
         let env = EnvironmentManager.shared
         let currentKey = env.getApiKey() ?? ""
@@ -936,7 +990,7 @@ class MainWindowController: NSWindowController {
         input.placeholderString = "sk-..."
         input.stringValue = currentKey
         
-        let repoLabel = NSTextField(labelWithString: "Workspace Root: \(env.repoRoot)")
+        let repoLabel = NSTextField(labelWithString: "DSH Folder: \(env.repoRoot)")
         repoLabel.font = NSFont.systemFont(ofSize: 11)
         repoLabel.textColor = .secondaryLabelColor
         
