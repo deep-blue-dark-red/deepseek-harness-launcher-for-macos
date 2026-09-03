@@ -111,7 +111,7 @@ make clean       # Remove build outputs and cached artifacts
 - **Architectures**: Apple Silicon (`arm64`) and Intel (`x86_64`) — `scripts/build.sh` produces a universal binary.
 - **Launcher Dependencies**:
   - **Prebuilt Binary**: None (pure native Swift/AppKit, zero runtime dependencies).
-  - **Building from Source**: Xcode Command Line Tools (`swiftc` via `xcode-select --install`) and `make`.
+  - **Building from Source**: Xcode Command Line Tools (`swiftc` via `xcode-select --install`) and `make` (brew install make).
 - **Target Workload**: A local clone of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (the launcher automatically discovers `node` and `pnpm` across Homebrew, nvm, asdf, proto, fnm, and volta).
 
 ---
