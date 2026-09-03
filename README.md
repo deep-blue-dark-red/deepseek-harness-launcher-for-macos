@@ -4,7 +4,7 @@
 
 # DeepSeek Harness Launcher for macOS
 
-**A minimal status-bar application for launching, restarting, and controlling [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), written in Swift.**
+**A lean appkit process controller for the [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) server, living in the menu-bar. Live task states, token usage, and process-management, written in Swift.**
 
 [![Release](https://img.shields.io/github/v/release/deep-blue-dark-red/deepseek-harness-launcher-for-macos?logo=github&label=Release&color=blue)](https://github.com/deep-blue-dark-red/deepseek-harness-launcher-for-macos/releases/latest)
 [![macOS](https://img.shields.io/badge/macOS-13.0%2B-blue?logo=apple&logoColor=white)](https://apple.com/macos)
