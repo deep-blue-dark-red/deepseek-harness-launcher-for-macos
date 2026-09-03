@@ -15,6 +15,8 @@ struct Constants {
     static let bundleIdentifier = "com.deepseek.harness.launcher"
     static let defaultPort = "3080"
     static let defaultProfile = "web"
+    static let defaultLaunchCommand = "pnpm dsh web"
+    static let launchCommandDefaultsKey = "customLaunchCommand"
     /// How long to wait for the server to advertise its URL before assuming the
     /// default loopback address rather than leaving the UI stuck in "Starting".
     static let startupTimeout: TimeInterval = 90
@@ -248,6 +250,57 @@ class ServerManager: NSObject {
     private(set) var currentWebUrl: String?
     private(set) var currentPort: String = Constants.defaultPort
 
+    /// The exact command used to start the harness server, editable in the
+    /// control panel and persisted in UserDefaults so it survives relaunches.
+    private(set) var launchCommand: String = {
+        let saved = UserDefaults.standard.string(forKey: Constants.launchCommandDefaultsKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let saved, !saved.isEmpty else { return Constants.defaultLaunchCommand }
+        return saved
+    }()
+
+    func setLaunchCommand(_ command: String) {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        launchCommand = trimmed.isEmpty ? Constants.defaultLaunchCommand : trimmed
+        UserDefaults.standard.set(launchCommand, forKey: Constants.launchCommandDefaultsKey)
+        appendLogLine(">>> Launch command saved: \(launchCommand)")
+    }
+
+    /// Splits a command line into tokens, honouring single and double quotes.
+    /// Shell operators are intentionally unsupported: the harness must stay a
+    /// direct child process so it can be torn down cleanly with the launcher.
+    static func tokenize(_ command: String) -> [String] {
+        var tokens: [String] = []
+        var current = ""
+        var quote: Character?
+        for ch in command {
+            if let open = quote {
+                if ch == open { quote = nil } else { current.append(ch) }
+            } else if ch == "'" || ch == "\"" {
+                quote = ch
+            } else if ch.isWhitespace {
+                if !current.isEmpty { tokens.append(current); current = "" }
+            } else {
+                current.append(ch)
+            }
+        }
+        if !current.isEmpty { tokens.append(current) }
+        return tokens
+    }
+
+    /// The `--port N` / `--port=N` value inside a tokenized command, if any.
+    private static func portArgument(in tokens: [String]) -> String? {
+        for (index, token) in tokens.enumerated() {
+            if token == "--port", index + 1 < tokens.count {
+                return tokens[index + 1]
+            }
+            if token.hasPrefix("--port=") {
+                return String(token.dropFirst("--port=".count))
+            }
+        }
+        return nil
+    }
+
     /// Trailing partial line from the last pipe read, held until its newline arrives.
     private var pendingOutput = ""
     private var startupTimeoutWork: DispatchWorkItem?
@@ -278,11 +331,10 @@ class ServerManager: NSObject {
         """
     }
     
-    static func killLingeringServerProcesses() {
-        // Only the port `dsh web` actually serves on. 5173 used to be swept too,
+    static func killLingeringServerProcesses(ports: [String] = [Constants.defaultPort]) {
+        // Only the port the server actually serves on. 5173 used to be swept too,
         // but the harness never binds it, so that could only kill an unrelated
         // Vite dev server belonging to the user.
-        let ports = [Constants.defaultPort]
         for port in ports {
             let task = Process()
             task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
@@ -304,7 +356,7 @@ class ServerManager: NSObject {
         }
     }
     
-    func startWebServer(port: String = Constants.defaultPort) {
+    func startWebServer() {
         // A previous failure must not wedge the launcher: starting is allowed from
         // .error as well as .stopped, so the "Retry" button actually retries.
         switch status {
@@ -315,13 +367,31 @@ class ServerManager: NSObject {
         }
 
         let env = EnvironmentManager.shared
-        guard let pnpm = env.pnpmPath else {
-            self.status = .error(message: "pnpm not found in PATH. Please install Node.js and pnpm.")
+
+        // Resolve the user-editable launch command from the control panel.
+        let tokens = ServerManager.tokenize(launchCommand)
+        guard let commandName = tokens.first, !commandName.isEmpty else {
+            self.status = .error(message: "Launch command is empty. Set it in the control panel.")
+            return
+        }
+
+        let executablePath: String
+        if commandName.hasPrefix("/") {
+            executablePath = commandName
+        } else if let resolved = EnvironmentManager.findBinary(named: commandName, path: env.pathEnvironment) {
+            executablePath = resolved
+        } else {
+            self.status = .error(message: "Launch command executable not found in PATH: \(commandName). Check the Launch Command field in the control panel.")
+            return
+        }
+        guard FileManager.default.isExecutableFile(atPath: executablePath) else {
+            self.status = .error(message: "Launch command executable is not runnable: \(executablePath)")
             return
         }
 
         // Clean up any stale process left holding the web port before starting
-        ServerManager.killLingeringServerProcesses()
+        let commandPort = ServerManager.portArgument(in: tokens) ?? Constants.defaultPort
+        ServerManager.killLingeringServerProcesses(ports: [commandPort])
         usleep(150_000)
 
         self.status = .starting
@@ -333,17 +403,11 @@ class ServerManager: NSObject {
         self.logFileHandle = try? FileHandle(forWritingTo: logFilePath)
         
         let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: pnpm)
+        proc.executableURL = URL(fileURLWithPath: executablePath)
         proc.currentDirectoryURL = URL(fileURLWithPath: env.repoRoot)
         
-        let requestedPort = port.trimmingCharacters(in: .whitespaces)
-        self.currentPort = requestedPort.isEmpty ? Constants.defaultPort : requestedPort
-
-        var procArgs = ["dsh", "web"]
-        if self.currentPort != Constants.defaultPort {
-            procArgs.append(contentsOf: ["--port", self.currentPort])
-        }
-        proc.arguments = procArgs
+        self.currentPort = commandPort
+        proc.arguments = Array(tokens.dropFirst())
 
         // No credentials are injected: the harness resolves its own API key.
         var procEnv = ProcessInfo.processInfo.environment
@@ -356,7 +420,7 @@ class ServerManager: NSObject {
         self.stdoutPipe = pipe
         self.process = proc
         
-        appendLogLine(">>> Starting DeepSeek Harness Web GUI (pnpm \(procArgs.joined(separator: " ")))...")
+        appendLogLine(">>> Starting DeepSeek Harness Web GUI (\(launchCommand)) in \(env.repoRoot)...")
         
         let outHandle = pipe.fileHandleForReading
         outHandle.readabilityHandler = { [weak self] handle in
@@ -1243,6 +1307,7 @@ class MainWindowController: NSWindowController {
     private var taskButton: NSButton!
     private var logsButton: NSButton!
     private var repoPathLabel: NSTextField!
+    private var launchCommandField: NSTextField!
     private var jobsTable: NSTableView!
     private var totalsLabel: NSTextField!
     private var haltButton: NSButton!
@@ -1475,46 +1540,74 @@ class MainWindowController: NSWindowController {
         logsButton.frame = NSRect(x: 290, y: buttonY - 55, width: 240, height: 42)
         container.addSubview(logsButton)
         
+        // Launch Command Card: shows and edits the exact server start command.
+        let commandCard = NSBox(frame: NSRect(x: 30, y: 62, width: 500, height: 66))
+        commandCard.titlePosition = .noTitle
+        commandCard.boxType = .custom
+        commandCard.cornerRadius = 10
+        commandCard.borderWidth = 1
+        commandCard.borderColor = NSColor.separatorColor
+        commandCard.fillColor = NSColor.controlBackgroundColor
+        container.addSubview(commandCard)
+        
+        let commandLabel = NSTextField(labelWithString: "Launch Command")
+        commandLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        commandLabel.frame = NSRect(x: 14, y: 42, width: 120, height: 14)
+        commandCard.contentView?.addSubview(commandLabel)
+        
+        let commandHint = NSTextField(labelWithString: "Runs in the DSH folder on Start · saved across reboots")
+        commandHint.font = NSFont.systemFont(ofSize: 10, weight: .regular)
+        commandHint.textColor = .tertiaryLabelColor
+        commandHint.alignment = .right
+        commandHint.frame = NSRect(x: 140, y: 43, width: 344, height: 14)
+        commandCard.contentView?.addSubview(commandHint)
+        
+        launchCommandField = NSTextField(string: ServerManager.shared.launchCommand)
+        launchCommandField.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        launchCommandField.frame = NSRect(x: 14, y: 10, width: 352, height: 24)
+        launchCommandField.lineBreakMode = .byTruncatingHead
+        launchCommandField.toolTip = "The exact command executed to start the server, relative to the DSH folder. The first word is resolved via your PATH (e.g. pnpm, node, or an absolute path). Shell operators like && are not supported. Takes effect on the next Start."
+        commandCard.contentView?.addSubview(launchCommandField)
+        
+        let saveCommandButton = NSButton(title: "Save", target: self, action: #selector(saveLaunchCommandClicked))
+        saveCommandButton.bezelStyle = .rounded
+        saveCommandButton.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        saveCommandButton.frame = NSRect(x: 374, y: 10, width: 54, height: 24)
+        commandCard.contentView?.addSubview(saveCommandButton)
+        
+        let resetCommandButton = NSButton(title: "Reset", target: self, action: #selector(resetLaunchCommandClicked))
+        resetCommandButton.bezelStyle = .rounded
+        resetCommandButton.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+        resetCommandButton.frame = NSRect(x: 432, y: 10, width: 54, height: 24)
+        commandCard.contentView?.addSubview(resetCommandButton)
+        
         // Author Credit Link (above separator)
-        let creditField = NSTextField(frame: NSRect(x: 20, y: 80, width: 520, height: 38))
-        creditField.isEditable = false
+        let creditField = NSTextField(labelWithString: "made by deep-blue-dark-red")
+        creditField.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+        creditField.textColor = .secondaryLabelColor
         creditField.isSelectable = true
         creditField.isBordered = false
         creditField.drawsBackground = false
-        creditField.lineBreakMode = .byWordWrapping
-        creditField.maximumNumberOfLines = 2
-        creditField.alignment = .center
-        
-        let creditText = "made by deep-blue-dark-red\nhttps://github.com/deep-blue-dark-red/deepseek-harness-launcher-for-macos"
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.alignment = .center
-        paragraphStyle.lineSpacing = 3
-        
-        let attrString = NSMutableAttributedString(string: creditText)
-        let linkRange = (creditText as NSString).range(of: "https://github.com/deep-blue-dark-red/deepseek-harness-launcher-for-macos")
-        attrString.addAttribute(.font, value: NSFont.systemFont(ofSize: 11, weight: .regular), range: NSRange(location: 0, length: attrString.length))
-        attrString.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: NSRange(location: 0, length: attrString.length))
-        attrString.addAttribute(.paragraphStyle, value: paragraphStyle, range: NSRange(location: 0, length: attrString.length))
-        if linkRange.location != NSNotFound {
-            attrString.addAttribute(.link, value: Constants.authorUrl, range: linkRange)
-        } else {
-            attrString.addAttribute(.link, value: Constants.authorUrl, range: NSRange(location: 0, length: attrString.length))
-        }
-        creditField.attributedStringValue = attrString
+        creditField.frame = NSRect(x: 30, y: 24, width: 340, height: 16)
+        let creditAttr = NSMutableAttributedString(
+            string: "made by deep-blue-dark-red",
+            attributes: [.foregroundColor: NSColor.secondaryLabelColor, .link: Constants.authorUrl]
+        )
+        creditField.attributedStringValue = creditAttr
         
         let clickRecognizer = NSClickGestureRecognizer(target: self, action: #selector(openAuthorUrlClicked))
         creditField.addGestureRecognizer(clickRecognizer)
         container.addSubview(creditField)
         
         // Bottom Utility Bar
-        let separator = NSBox(frame: NSRect(x: 30, y: 70, width: 500, height: 1))
+        let separator = NSBox(frame: NSRect(x: 30, y: 54, width: 500, height: 1))
         separator.boxType = .separator
         container.addSubview(separator)
         
         let docsButton = NSButton(title: "Docs & Guides", target: self, action: #selector(openDocsClicked))
         docsButton.bezelStyle = .inline
         docsButton.font = NSFont.systemFont(ofSize: 12, weight: .regular)
-        docsButton.frame = NSRect(x: 400, y: 25, width: 130, height: 28)
+        docsButton.frame = NSRect(x: 400, y: 20, width: 130, height: 28)
         container.addSubview(docsButton)
     }
     
@@ -1562,6 +1655,16 @@ class MainWindowController: NSWindowController {
         case .stopped, .error:
             ServerManager.shared.startWebServer()
         }
+    }
+
+    @objc private func saveLaunchCommandClicked() {
+        ServerManager.shared.setLaunchCommand(launchCommandField.stringValue)
+        launchCommandField.stringValue = ServerManager.shared.launchCommand
+    }
+
+    @objc private func resetLaunchCommandClicked() {
+        launchCommandField.stringValue = Constants.defaultLaunchCommand
+        ServerManager.shared.setLaunchCommand(Constants.defaultLaunchCommand)
     }
     
     @objc private func openBrowserClicked() {
