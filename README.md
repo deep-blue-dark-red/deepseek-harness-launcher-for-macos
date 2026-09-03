@@ -20,9 +20,7 @@
 
 ---
 
-## Installation
-
-Run the end-to-end installer:
+## Install
 
 ```bash
 git clone https://github.com/deep-blue-dark-red/deepseek-harness-launcher-for-macos
@@ -30,14 +28,16 @@ cd deepseek-harness-launcher-for-macos
 ./install.sh
 ```
 
-Once installed, launch **DeepSeek Harness Launcher** via:
-- **Spotlight / Raycast**: Press `Cmd + Space`, type `DeepSeek Harness Launcher`, and press `Enter`.
-- **Finder / Launchpad**: Open `~/Applications/DeepSeek Harness Launcher.app`.
-- **Terminal**: `open -a "DeepSeek Harness Launcher"`
+Launch via Spotlight (`Cmd + Space`), Finder/Launchpad (`~/Applications/DeepSeek Harness Launcher.app`), or Terminal: `open -a "DeepSeek Harness Launcher"`.
 
-## Uninstallation
+## Update
 
-To remove the application and stop background processes:
+```bash
+git pull    # or check out a release tag
+./install.sh
+```
+
+## Uninstall
 
 ```bash
 ./uninstall.sh
@@ -47,23 +47,23 @@ To remove the application and stop background processes:
 
 ## Overview
 
-**DeepSeek Harness Launcher** (`DeepSeek Harness Launcher.app`) is a lightweight native macOS AppKit application designed to launch, control, and monitor DeepSeek Harness servers, web interfaces, interactive terminal sessions, and headless tasks directly from your macOS Menu Bar, Dock, Spotlight, Raycast, or Launchpad.
+A lightweight native AppKit app that launches, controls, and monitors DeepSeek Harness servers, web UI, interactive terminal sessions, and headless tasks from the macOS menu bar. The DSH server process is a managed child process of DSHL, which acts as a process watchdog. Quitting DSHL gracefully shuts down the DSH process.
 
 ---
 
 ## Features
 
-- **Menu Bar & Status Item**: Instant access from the macOS menu bar. The status badge reads `🐳` (happy whale) when started and nothing to do, `🐋 0|1` (working whale) with one task running and zero completed, `🐳 3|3` (happy whale) once three tasks have completed — the counter is `<completed>|<total>` — plus `🐡` (puffer fish) during server startup and `🦑` (squid) when the server is not running.
-- **Menu Bar Task Dropdown**: The dropdown lists every session with its task name and status, quick navigation (click a task to open it in the web UI), and per-task plus session-total token usage (`↓ in  ↑ out`).
+- **Menu Bar & Status Item**: badge shows `🐳` (idle), `🐡` (starting), `🦑` (server stopped), and `<completed>|<total>` while tasks run — e.g. `🐋 0|1` (one running), `🐳 3|3` (all done); additionally `🐳 3|3 🐡 1` means 3 tasks completed, 1 halted (error or user input required). 
+- **Menu Bar Task Dropdown**: every session with task name and status; click a task to open it in the web UI; per-task and session-total token usage (`↓ in  ↑ out`).
   <img src="resources/menu-bar-detail.png" alt="Menu bar dropdown showing task names, statuses, quick navigation, and token usage" width="600" />
-- **Central Control Window**: High-resolution GUI panel displaying active workspace, server state, quick action buttons, and configuration options.
-- **Interactive Terminal Session**: Opens a native terminal window pre-configured with workspace paths and `$PATH` discovery.
-- **Headless Task Launcher**: Run ad-hoc AI tasks on demand (`dsh --profile headless "<task>"`) with a native prompt dialog.
-- **Live Log Viewer**: Dedicated console window displaying real-time streaming server logs and historical output, with copy, clear, and direct log file opening.
-- **Smart Environment Discovery**: Automatically locates `node` (>= 22.19.0) and `pnpm` across Homebrew (`/opt/homebrew`, `/usr/local`), `nvm`, `asdf`, `proto`, `fnm`, and `volta`, preserving your login shell's own `$PATH` precedence.
-- **Handles No Secrets**: The launcher never reads, stores, or forwards your API key. DeepSeek Harness owns its own write-only credential store (`$DSH_HOME/.credentials.yaml`, managed from the **Providers** page in the web UI) and also honours an ambient `DEEPSEEK_API_KEY`.
-- **Server Startup & Clean Teardown**: DeepSeek-Harness runs as a managed child process; killing DSHL also tears down the child server process cleanly, mitigating the need for console commands entirely. No terminal process is started (hidden, with output streamable via *View Live Logs*). Session states are preserved.
-- **Zero Telemetry & Private**: No analytics, telemetry, or third-party network calls. I wrote this for my own usage for quick launching via Raycast, Spotlight, or menu bar.
+- **Control Window**: server state and server process actions, configuration and job history.
+- **Interactive Terminal Session**: native terminal window pre-configured with workspace paths and `$PATH`.
+- **Headless Task Launcher**: ad-hoc AI tasks via `dsh --profile headless "<task>"` with a native prompt dialog.
+- **Live Log Viewer**: real-time streaming server logs plus history; copy, clear, or open the log file.
+- **Environment Discovery**: finds `node` (>= 22.19.0) and `pnpm` across Homebrew, `nvm`, `asdf`, `proto`, `fnm`, and `volta`, preserving your login shell's `$PATH` precedence.
+- **Handles No Secrets**: never reads, stores, or forwards your API key. DeepSeek Harness owns its write-only credential store (`$DSH_HOME/.credentials.yaml`, managed from the **Providers** page in the web UI) and also honours an ambient `DEEPSEEK_API_KEY`.
+- **Managed Server Lifecycle**: the server runs as a managed child process; quitting the launcher tears it down cleanly. No terminal window is ever started (but you can stream output via *View Live Logs*). Session states are preserved on teardown and resumed on restart.
+- **Zero Telemetry**: no analytics, telemetry, or third-party network calls. **Strong recommendation:  audit harnesses/plugin source-code with your agent of choice**. 
 
 ---
 
@@ -77,15 +77,15 @@ deepseek-harness-launcher-for-macos/
 ├── Makefile                    # Make targets (build, install, uninstall, clean)
 ├── dsh-launcher.command        # Double-clickable macOS Finder script
 ├── resources/
-│   ├── AppIcon.icns            # Multi-resolution Retina icon bundle (16x16 to 1024x1024)
-│   ├── desktop-macos.png       # High-resolution desktop UI screenshot
-│   ├── menu-bar-detail.png     # Menu bar dropdown screenshot (tasks & token usage)
-│   ├── whale-harness.png       # High-resolution logo artwork
+│   ├── AppIcon.icns            # Multi-resolution Retina icon bundle
+│   ├── desktop-macos.png       # Desktop UI screenshot
+│   ├── menu-bar-detail.png     # Menu bar dropdown screenshot
+│   ├── whale-harness.png       # Logo artwork
 │   └── favicon.svg             # Vector icon asset
 ├── src/
 │   └── main.swift              # Native Swift AppKit Launcher implementation
 └── scripts/
-    ├── build.sh                # Compiles swift source and bundles DeepSeek Harness Launcher.app
+    ├── build.sh                # Compiles Swift source and bundles the .app
     ├── generate-icon.sh        # Generates soft-corner squircle .icns from artwork
     └── install.sh              # Bundle installer helper
 ```
@@ -107,12 +107,10 @@ make clean       # Remove build outputs and cached artifacts
 
 ## System Requirements
 
-- **Operating System**: macOS 13.0 (Ventura) or newer (Sonoma, Sequoia).
+- **OS**: macOS 13.0 (Ventura) or newer.
 - **Architectures**: Apple Silicon (`arm64`) and Intel (`x86_64`) — `scripts/build.sh` produces a universal binary.
-- **Launcher Dependencies**:
-  - **Prebuilt Binary**: None (pure native Swift/AppKit, zero runtime dependencies).
-  - **Building from Source**: Xcode Command Line Tools (`swiftc` via `xcode-select --install`) and `make` (brew install make).
-- **Target Workload**: A local clone of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (the launcher automatically discovers `node` and `pnpm` across Homebrew, nvm, asdf, proto, fnm, and volta).
+- **Dependencies**: none at runtime (pure native Swift/AppKit). To build from source: Xcode Command Line Tools (`swiftc` via `xcode-select --install`) and `make`.
+- **Target Workload**: a local clone of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
 
 ---
 
